@@ -1,10 +1,10 @@
-import streamlit as st 
+import streamlit as st
 
-from streamlit_gsheets import GSheetsConnection
+ from streamlit_gsheets import GSheetsConnection
 
-st.set_page_config(layout="wide") 
+st.set_page_config(layout="wide")
 
-st.title(" 階段三：外星文濾網分流與空間歸隊測試") 
+st.title(" 階段 3.5：iterrows 迴圈解構點名現場實驗") 
 
 st.caption("授權標註：edit by 闕河正")
 
@@ -12,35 +12,18 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 df = conn.read(worksheet="Tasks", ttl="0")
 
-st.write("---")
+todo_df = df[df["status"] == "To Do"]
 
-col1, col2, col3 = st.columns(3)
+st.write("---") 
 
-with col1: 
+st.write("###  進入 Python 迴圈自動化點名現場：")
 
-    st.markdown("###  To Do") 
+for idx, row in todo_df.iterrows(): 
 
-    #  內層做濾網，外層做篩選：只抓出狀態為 To Do 的小表格 
+    # 每一圈，我們用一個小紅框（st.error）來代表一次巡迴 
 
-    todo_df = df[df["status"] == "To Do"] # 把它印在左邊這欄 
-    st.dataframe(todo_df)
+    st.error(f" 迴圈巡邏：目前點名點到了第 {idx} 行的任務：") 
 
-with col2: 
+    st.write(f" ➔ 【title 任務名稱】這一格拿到了： {row['title']}") 
 
-    st.markdown("###  In Progress") 
-
-    #  只抓出狀態為 In Progress 的小表格 
-
-    ip_df = df[df["status"] == "In Progress"] 
-
-    st.dataframe(ip_df)
-
-with col3: 
-
-    st.markdown("###  Done") 
-
-    #  只抓出狀態為 Done 的小表格 
-
-    done_df = df[df["status"] == "Done"] 
-
-    st.dataframe(done_df)
+    st.write(f" ➔ 【owner 負責人】這一格拿到了： {row['owner']}")
