@@ -32,7 +32,7 @@ with st.form("task_input_form", clear_on_submit=True):
 
     with c_status:
 
-        new_status = st.selectbox(" 狀態", ["To Do", "In Processing", "Done"])
+        new_status = st.selectbox(" 狀態", ["To Do", "In  Executing", "Done"])
 
     with c_owner:
 
@@ -96,13 +96,13 @@ with trello_col1:
 
         st.info("暫無待辦任務")
 
-#  【第二欄：In Processing】
+#  【第二欄：In  Executing】
 
 with trello_col2:
 
-    st.markdown("### <span style='color:orange'> In Processing (執行中)</span>", unsafe_allow_html=True)
+    st.markdown("### <span style='color:orange'> In  Executing (執行中)</span>", unsafe_allow_html=True)
 
-    ip_list = df[df["status"] == "In Processing"]
+    ip_list = df[df["status"] == "In  Executing"]
 
     
 
