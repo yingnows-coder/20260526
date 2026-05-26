@@ -10,7 +10,7 @@ st.caption("授權標註：edit by 闕河正 | 專屬資淺初學者講義")
 st.write("---")
 
 # 2. 呼叫 st.columns(3)，在網頁橫向切出三個一模一樣寬度的大直欄變數
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, co14 = st.columns(4)
 
 # 3. 運用 with 語法，像填空一樣把文字塞進對應的直欄空間裡
 with col1:
@@ -24,3 +24,7 @@ with col2:
 with col3:
     st.markdown("### Done (已完成)")
     st.write("這裡未來要放『已完成』的卡片")
+
+with col4:
+    st.markdown("### Backlog (後備任務)")
+    st.write("這裡未來要放『後備任務』的卡片")
