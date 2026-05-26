@@ -32,7 +32,7 @@ with st.form("task_input_form", clear_on_submit=True):
 
     with c_status:
 
-        new_status = st.selectbox(" 狀態", ["To Do", "In Progress", "Done"])
+        new_status = st.selectbox(" 狀態", ["To Do", "In Processing", "Done"])
 
     with c_owner:
 
