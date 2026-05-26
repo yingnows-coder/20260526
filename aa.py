@@ -96,7 +96,7 @@ with trello_col1:
 
         st.info("暫無待辦任務")
 
-#  【第二欄：In Progress】
+#  【第二欄：In Processing】
 
 with trello_col2:
 
