@@ -14,7 +14,7 @@ from streamlit_gsheets import GSheetsConnection
 
 # 第 4 行：在網頁上印出大標題
 
-st.title(" 闕老師的雲端資料庫連線測試")
+st.title(" 雲端資料庫連線測試")
 
 # ==========================================
 
