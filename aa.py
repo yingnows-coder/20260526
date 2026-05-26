@@ -100,9 +100,9 @@ with trello_col1:
 
 with trello_col2:
 
-    st.markdown("### <span style='color:orange'> In Progress (執行中)</span>", unsafe_allow_html=True)
+    st.markdown("### <span style='color:orange'> In Processing (執行中)</span>", unsafe_allow_html=True)
 
-    ip_list = df[df["status"] == "In Progress"]
+    ip_list = df[df["status"] == "In Processing"]
 
     
 
