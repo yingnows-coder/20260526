@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
-from streamlit_sortables import sort_items
 
 # ==========================================
 # 基本設定
