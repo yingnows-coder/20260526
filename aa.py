@@ -8,169 +8,178 @@ from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(layout="wide")
 
-st.title("📌 真正拖拉式 Trello 看板")
-st.caption("Drag & Drop + Google Sheets 雲端同步")
+st.title("📌 階段四終極完成版：GitHub 雲端同步 Trello 看板")
+st.caption("授權標註：edit by 闕河正 | 完整功能版")
 
 # ==========================================
-# Google Sheets 連線
+# 連接 Google Sheets
 # ==========================================
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 df = conn.read(worksheet="Tasks", ttl=0)
 
-# 空表防呆
+# 避免空資料錯誤
 if df.empty:
     df = pd.DataFrame(columns=["title", "status", "owner"])
 
 # ==========================================
-# 新增任務
+# 區塊一：新增任務
 # ==========================================
 
-with st.form("new_task", clear_on_submit=True):
+st.write("### 📝 指派新任務")
 
-    col1, col2, col3 = st.columns([2,1,1])
+with st.form("task_input_form", clear_on_submit=True):
 
-    with col1:
-        title = st.text_input("任務名稱")
+    c_title, c_status, c_owner = st.columns([2, 1, 1])
 
-    with col2:
-        owner = st.text_input("負責人")
+    with c_title:
+        new_title = st.text_input(
+            "📌 任務名稱",
+            placeholder="輸入任務名稱..."
+        )
 
-    with col3:
-        status = st.selectbox(
-            "狀態",
+    with c_status:
+        new_status = st.selectbox(
+            "📂 狀態",
             ["To Do", "In Executing", "Done"]
         )
 
-    submit = st.form_submit_button("新增任務")
+    with c_owner:
+        new_owner = st.text_input(
+            "👤 負責人",
+            placeholder="誰來負責..."
+        )
 
-if submit and title and owner:
+    submit_btn = st.form_submit_button("✅ 確認指派並同步雲端")
 
-    new_row = pd.DataFrame([{
-        "title": title,
-        "status": status,
-        "owner": owner
-    }])
+# 新增資料
+if submit_btn and new_title and new_owner:
 
-    df = pd.concat([df, new_row], ignore_index=True)
-
-    conn.update(
-        worksheet="Tasks",
-        data=df
-    )
-
-    st.success("✅ 任務已新增")
-
-    st.rerun()
-
-st.divider()
-
-# ==========================================
-# 建立拖拉資料
-# ==========================================
-
-todo_tasks = df[df["status"] == "To Do"]["title"].tolist()
-
-doing_tasks = df[df["status"] == "In Executing"]["title"].tolist()
-
-done_tasks = df[df["status"] == "Done"]["title"].tolist()
-
-# ==========================================
-# Trello Drag UI
-# ==========================================
-
-board = [
-
-    {
-        "header": "🔴 To Do",
-        "items": todo_tasks
-    },
-
-    {
-        "header": "🟠 In Executing",
-        "items": doing_tasks
-    },
-
-    {
-        "header": "🟢 Done",
-        "items": done_tasks
+    new_data = {
+        "title": new_title,
+        "status": new_status,
+        "owner": new_owner
     }
-]
 
-# ==========================================
-# 顯示拖拉元件
-# ==========================================
+    new_row = pd.DataFrame([new_data])
 
-sorted_board = sort_items(
-    board,
-    multi_containers=True
-)
-
-# ==========================================
-# 同步回 Google Sheets
-# ==========================================
-
-status_map = {
-    "🔴 To Do": "To Do",
-    "🟠 In Executing": "In Executing",
-    "🟢 Done": "Done"
-}
-
-updated_rows = []
-
-for column in sorted_board:
-
-    status = status_map[column["header"]]
-
-    for task_title in column["items"]:
-
-        # 找原始資料
-        task_data = df[df["title"] == task_title].iloc[0]
-
-        updated_rows.append({
-            "title": task_title,
-            "status": status,
-            "owner": task_data["owner"]
-        })
-
-updated_df = pd.DataFrame(updated_rows)
-
-# ==========================================
-# 更新資料
-# ==========================================
-
-if not updated_df.equals(df):
+    updated_df = pd.concat([df, new_row], ignore_index=True)
 
     conn.update(
         worksheet="Tasks",
         data=updated_df
     )
 
-    st.success("✅ 看板已同步更新")
-
-# ==========================================
-# 額外功能：刪除任務
-# ==========================================
-
-st.divider()
-
-st.write("### 🗑️ 刪除任務")
-
-task_to_delete = st.selectbox(
-    "選擇任務",
-    df["title"].tolist()
-)
-
-if st.button("刪除"):
-
-    df = df[df["title"] != task_to_delete]
-
-    conn.update(
-        worksheet="Tasks",
-        data=df
-    )
-
-    st.warning("⚠️ 任務已刪除")
+    st.success("✅ 任務已成功同步到 Google Sheets！")
 
     st.rerun()
+
+st.write("---")
+
+# ==========================================
+# 區塊二：Trello 看板
+# ==========================================
+
+st.write("### 📊 看板動態狀態監控")
+
+trello_col1, trello_col2, trello_col3 = st.columns(3)
+
+# ==========================================
+# 共用卡片函式
+# ==========================================
+
+def render_tasks(task_df, column_name):
+
+    if not task_df.empty:
+
+        for idx, row in task_df.iterrows():
+
+            with st.container(border=True):
+
+                st.write(f"### {row['title']}")
+                st.caption(f"👤 負責人：{row['owner']}")
+
+                # 修改狀態
+                new_status = st.selectbox(
+                    "更新狀態",
+                    ["To Do", "In Executing", "Done"],
+                    index=["To Do", "In Executing", "Done"].index(row["status"]),
+                    key=f"status_{idx}"
+                )
+
+                # 更新按鈕
+                if st.button("💾 更新", key=f"update_{idx}"):
+
+                    df.loc[idx, "status"] = new_status
+
+                    conn.update(
+                        worksheet="Tasks",
+                        data=df
+                    )
+
+                    st.success("✅ 狀態已更新")
+
+                    st.rerun()
+
+                # 刪除按鈕
+                if st.button("🗑️ 刪除任務", key=f"delete_{idx}"):
+
+                    updated_df = df.drop(idx).reset_index(drop=True)
+
+                    conn.update(
+                        worksheet="Tasks",
+                        data=updated_df
+                    )
+
+                    st.warning("⚠️ 任務已刪除")
+
+                    st.rerun()
+
+    else:
+        st.info(f"暫無 {column_name} 任務")
+
+# ==========================================
+# 第一欄：To Do
+# ==========================================
+
+with trello_col1:
+
+    st.markdown(
+        "## <span style='color:red'>🔴 To Do</span>",
+        unsafe_allow_html=True
+    )
+
+    todo_list = df[df["status"] == "To Do"]
+
+    render_tasks(todo_list, "待辦")
+
+# ==========================================
+# 第二欄：In Executing
+# ==========================================
+
+with trello_col2:
+
+    st.markdown(
+        "## <span style='color:orange'>🟠 In Executing</span>",
+        unsafe_allow_html=True
+    )
+
+    ip_list = df[df["status"] == "In Executing"]
+
+    render_tasks(ip_list, "執行中")
+
+# ==========================================
+# 第三欄：Done
+# ==========================================
+
+with trello_col3:
+
+    st.markdown(
+        "## <span style='color:green'>🟢 Done</span>",
+        unsafe_allow_html=True
+    )
+
+    done_list = df[df["status"] == "Done"]
+
+    render_tasks(done_list, "已完成")
