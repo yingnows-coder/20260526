@@ -167,7 +167,10 @@ def render_tasks(task_df, column_name):
                     key=f"status_{idx}"
                 )
 
+                # ==========================================
                 # 更新按鈕
+                # ==========================================
+
                 if st.button("💾 更新", key=f"update_{idx}"):
 
                     current_update_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -187,7 +190,54 @@ def render_tasks(task_df, column_name):
 
                     st.rerun()
 
+                # ==========================================
+                # 封存按鈕（只在 Done 顯示）
+                # ==========================================
+
+                if row["status"] == "Done":
+
+                    if st.button("📦 封存到 Data", key=f"archive_{idx}"):
+
+                        # 讀取 Data 工作頁
+                        data_df = conn.read(
+                            worksheet="Data",
+                            ttl=0
+                        )
+
+                        # Data 為空時初始化
+                        if data_df.empty:
+
+                            data_df = pd.DataFrame(columns=df.columns)
+
+                        # 加入封存資料
+                        archived_df = pd.concat(
+                            [data_df, pd.DataFrame([row])],
+                            ignore_index=True
+                        )
+
+                        # 更新 Data 工作頁
+                        conn.update(
+                            worksheet="Data",
+                            data=archived_df
+                        )
+
+                        # 從 Tasks 移除
+                        updated_df = df.drop(idx).reset_index(drop=True)
+
+                        # 更新 Tasks 工作頁
+                        conn.update(
+                            worksheet="Tasks",
+                            data=updated_df
+                        )
+
+                        st.success("✅ 已封存到 Data 工作頁")
+
+                        st.rerun()
+
+                # ==========================================
                 # 刪除按鈕
+                # ==========================================
+
                 if st.button("🗑️ 刪除任務", key=f"delete_{idx}"):
 
                     updated_df = df.drop(idx).reset_index(drop=True)
@@ -248,47 +298,3 @@ with col3:
     done_df = df[df["status"] == "Done"]
 
     render_tasks(done_df, "已完成")
-
-                # ==========================================
-                # 封存按鈕（只在 Done 顯示）
-                # ==========================================
-
-                if row["status"] == "Done":
-
-                    if st.button("📦 封存到 Data", key=f"archive_{idx}"):
-
-                        # 讀取 Data 工作頁
-                        data_df = conn.read(
-                            worksheet="Data",
-                            ttl=0
-                        )
-
-                        # 若 Data 工作頁為空
-                        if data_df.empty:
-
-                            data_df = pd.DataFrame(columns=df.columns)
-
-                        # 加入封存資料
-                        archived_df = pd.concat(
-                            [data_df, pd.DataFrame([row])],
-                            ignore_index=True
-                        )
-
-                        # 更新 Data 工作頁
-                        conn.update(
-                            worksheet="Data",
-                            data=archived_df
-                        )
-
-                        # 從 Tasks 移除
-                        updated_df = df.drop(idx).reset_index(drop=True)
-
-                        # 更新 Tasks 工作頁
-                        conn.update(
-                            worksheet="Tasks",
-                            data=updated_df
-                        )
-
-                        st.success("✅ 已封存到 Data 工作頁")
-
-                        st.rerun()
