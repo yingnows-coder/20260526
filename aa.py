@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
+import plotly.express as px
 
 # ==========================================
 # 基本設定
@@ -9,96 +10,168 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📌 震唯機械任務指派看板：GitHub 雲端同步 Trello 看板")
-st.caption("授權標註：edit by 林溫城 | 2026052701A版")
+st.title("📌 企業級 Trello 雲端管理系統")
+st.caption("edit by 闕河正")
 
 # ==========================================
-# 連接 Google Sheets
+# Google Sheets
 # ==========================================
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 df = conn.read(worksheet="Tasks", ttl=0)
 
-# 避免空資料錯誤
+# ==========================================
+# 初始化
+# ==========================================
+
 if df.empty:
+
     df = pd.DataFrame(columns=[
         "department",
         "customer",
-        "datetime",
         "title",
         "status",
-        "owner"
+        "owner",
+        "created_time",
+        "due_time",
+        "updated_time"
     ])
 
 # ==========================================
-# 區塊一：新增任務
+# 搜尋功能
 # ==========================================
 
-st.write("### 📝 指派新任務")
+st.sidebar.title("🔍 搜尋任務")
 
-with st.form("task_input_form", clear_on_submit=True):
+search_text = st.sidebar.text_input(
+    "輸入關鍵字",
+    placeholder="搜尋任務/客戶/負責人"
+)
 
-    c_dept, c_customer = st.columns([1, 2])
+# 搜尋過濾
+if search_text:
 
-    # 部門選擇
-    with c_dept:
+    df = df[
+        df.astype(str)
+        .apply(lambda row: row.str.contains(search_text, case=False).any(), axis=1)
+    ]
+
+# ==========================================
+# KPI 統計
+# ==========================================
+
+st.write("## 📈 KPI 統計")
+
+total_tasks = len(df)
+
+done_tasks = len(df[df["status"] == "Done"])
+
+todo_tasks = len(df[df["status"] == "To Do"])
+
+executing_tasks = len(df[df["status"] == "In Executing"])
+
+completion_rate = 0
+
+if total_tasks > 0:
+    completion_rate = round((done_tasks / total_tasks) * 100, 1)
+
+k1, k2, k3, k4 = st.columns(4)
+
+k1.metric("📌 總任務", total_tasks)
+k2.metric("🟢 已完成", done_tasks)
+k3.metric("🟠 執行中", executing_tasks)
+k4.metric("✅ 完成率", f"{completion_rate}%")
+
+# ==========================================
+# KPI 圖表
+# ==========================================
+
+chart_df = pd.DataFrame({
+    "狀態": ["To Do", "In Executing", "Done"],
+    "數量": [todo_tasks, executing_tasks, done_tasks]
+})
+
+fig = px.pie(
+    chart_df,
+    names="狀態",
+    values="數量",
+    title="📊 任務狀態分布"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+st.write("---")
+
+# ==========================================
+# 新增任務
+# ==========================================
+
+st.write("## 📝 建立新任務")
+
+with st.form("task_form", clear_on_submit=True):
+
+    c1, c2 = st.columns([1, 2])
+
+    with c1:
+
         new_department = st.selectbox(
             "🏢 部門",
             ["業務", "生產", "驗收", "售服"]
         )
 
-    # 客戶資訊
-    with c_customer:
+    with c2:
+
         new_customer = st.text_input(
-            "🏭 客戶資訊",
-            placeholder="輸入客戶名稱..."
+            "🏭 客戶資訊"
         )
 
-    c_title, c_status, c_owner = st.columns([2, 1, 1])
+    c3, c4, c5 = st.columns([2, 1, 1])
 
-    # 任務名稱
-    with c_title:
+    with c3:
+
         new_title = st.text_input(
-            "📌 任務名稱",
-            placeholder="輸入任務名稱..."
+            "📌 任務名稱"
         )
 
-    # 狀態
-    with c_status:
+    with c4:
+
         new_status = st.selectbox(
             "📂 狀態",
             ["To Do", "In Executing", "Done"]
         )
 
-    # 負責人
-    with c_owner:
+    with c5:
+
         new_owner = st.text_input(
-            "👤 負責人",
-            placeholder="誰來負責..."
+            "👤 負責人"
         )
 
-    # 日期時間
-    new_datetime = st.datetime_input(
-        "🕒 時間",
+    new_due_time = st.datetime_input(
+        "⏰ 預計完成時間",
         value=datetime.now()
     )
 
-    submit_btn = st.form_submit_button("✅ 確認指派並同步雲端")
+    submit_btn = st.form_submit_button("✅ 建立任務")
 
 # ==========================================
-# 新增資料
+# 建立資料
 # ==========================================
 
 if submit_btn and new_title and new_owner:
 
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     new_data = {
+
         "department": new_department,
         "customer": new_customer,
-        "datetime": new_datetime.strftime("%Y-%m-%d %H:%M"),
         "title": new_title,
         "status": new_status,
-        "owner": new_owner
+        "owner": new_owner,
+        "created_time": current_time,
+        "due_time": new_due_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_time": current_time
     }
 
     new_row = pd.DataFrame([new_data])
@@ -110,22 +183,22 @@ if submit_btn and new_title and new_owner:
         data=updated_df
     )
 
-    st.success("✅ 任務已成功同步到 Google Sheets！")
+    st.success("✅ 任務建立成功")
 
     st.rerun()
 
 st.write("---")
 
 # ==========================================
-# 區塊二：Trello 看板
+# Trello 看板
 # ==========================================
 
-st.write("### 📊 看板動態狀態監控")
+st.write("## 📊 任務管理看板")
 
-trello_col1, trello_col2, trello_col3 = st.columns(3)
+col1, col2, col3 = st.columns(3)
 
 # ==========================================
-# 共用卡片函式
+# 卡片函式
 # ==========================================
 
 def render_tasks(task_df, column_name):
@@ -134,23 +207,61 @@ def render_tasks(task_df, column_name):
 
         for idx, row in task_df.iterrows():
 
+            # ==================================
+            # 逾期判斷
+            # ==================================
+
+            overdue = False
+
+            try:
+
+                due_time = datetime.strptime(
+                    str(row.get("due_time", "")),
+                    "%Y-%m-%d %H:%M:%S"
+                )
+
+                if due_time < datetime.now() and row["status"] != "Done":
+                    overdue = True
+
+            except:
+                pass
+
+            # ==================================
+            # 卡片
+            # ==================================
+
             with st.container(border=True):
+
+                # 逾期紅字
+                if overdue:
+                    st.error("🚨 任務已逾期")
 
                 st.write(f"### {row['title']}")
 
-                # 顯示部門
                 st.caption(f"🏢 部門：{row.get('department', '')}")
-
-                # 顯示客戶
                 st.caption(f"🏭 客戶：{row.get('customer', '')}")
-
-                # 顯示負責人
                 st.caption(f"👤 負責人：{row['owner']}")
 
-                # 顯示時間
-                st.caption(f"🕒 時間：{row.get('datetime', '')}")
+                st.caption(f"🕒 建立時間：{row.get('created_time', '')}")
 
-                # 修改狀態
+                st.caption(f"⏰ 預計完成：{row.get('due_time', '')}")
+
+                st.caption(f"🔄 最後更新：{row.get('updated_time', '')}")
+
+                # 剩餘時間
+                try:
+
+                    remaining = due_time - datetime.now()
+
+                    days = remaining.days
+
+                    if days >= 0 and not overdue:
+                        st.info(f"⏳ 剩餘 {days} 天")
+
+                except:
+                    pass
+
+                # 狀態更新
                 new_status = st.selectbox(
                     "更新狀態",
                     ["To Do", "In Executing", "Done"],
@@ -161,7 +272,11 @@ def render_tasks(task_df, column_name):
                 # 更新按鈕
                 if st.button("💾 更新", key=f"update_{idx}"):
 
+                    current_update_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
                     df.loc[idx, "status"] = new_status
+
+                    df.loc[idx, "updated_time"] = current_update_time
 
                     conn.update(
                         worksheet="Tasks",
@@ -172,7 +287,7 @@ def render_tasks(task_df, column_name):
 
                     st.rerun()
 
-                # 刪除按鈕
+                # 刪除
                 if st.button("🗑️ 刪除任務", key=f"delete_{idx}"):
 
                     updated_df = df.drop(idx).reset_index(drop=True)
@@ -187,49 +302,50 @@ def render_tasks(task_df, column_name):
                     st.rerun()
 
     else:
-        st.info(f"暫無 {column_name} 任務")
+
+        st.info(f"目前沒有 {column_name} 任務")
 
 # ==========================================
-# 第一欄：To Do
+# To Do
 # ==========================================
 
-with trello_col1:
+with col1:
 
     st.markdown(
         "## <span style='color:red'>🔴 To Do</span>",
         unsafe_allow_html=True
     )
 
-    todo_list = df[df["status"] == "To Do"]
+    todo_df = df[df["status"] == "To Do"]
 
-    render_tasks(todo_list, "待辦")
+    render_tasks(todo_df, "待辦")
 
 # ==========================================
-# 第二欄：In Executing
+# In Executing
 # ==========================================
 
-with trello_col2:
+with col2:
 
     st.markdown(
         "## <span style='color:orange'>🟠 In Executing</span>",
         unsafe_allow_html=True
     )
 
-    ip_list = df[df["status"] == "In Executing"]
+    executing_df = df[df["status"] == "In Executing"]
 
-    render_tasks(ip_list, "執行中")
+    render_tasks(executing_df, "執行中")
 
 # ==========================================
-# 第三欄：Done
+# Done
 # ==========================================
 
-with trello_col3:
+with col3:
 
     st.markdown(
         "## <span style='color:green'>🟢 Done</span>",
         unsafe_allow_html=True
     )
 
-    done_list = df[df["status"] == "Done"]
+    done_df = df[df["status"] == "Done"]
 
-    render_tasks(done_list, "已完成")
+    render_tasks(done_df, "已完成")
