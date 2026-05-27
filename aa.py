@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
+from datetime import datetime
 
 # ==========================================
 # 基本設定
@@ -21,7 +22,14 @@ df = conn.read(worksheet="Tasks", ttl=0)
 
 # 避免空資料錯誤
 if df.empty:
-    df = pd.DataFrame(columns=["title", "status", "owner"])
+    df = pd.DataFrame(columns=[
+        "department",
+        "customer",
+        "datetime",
+        "title",
+        "status",
+        "owner"
+    ])
 
 # ==========================================
 # 區塊一：新增任務
@@ -31,32 +39,63 @@ st.write("### 📝 指派新任務")
 
 with st.form("task_input_form", clear_on_submit=True):
 
+    c_dept, c_customer = st.columns([1, 2])
+
+    # 部門選擇
+    with c_dept:
+        new_department = st.selectbox(
+            "🏢 部門",
+            ["業務", "生產", "驗收", "售服"]
+        )
+
+    # 客戶資訊
+    with c_customer:
+        new_customer = st.text_input(
+            "🏭 客戶資訊",
+            placeholder="輸入客戶名稱..."
+        )
+
     c_title, c_status, c_owner = st.columns([2, 1, 1])
 
+    # 任務名稱
     with c_title:
         new_title = st.text_input(
             "📌 任務名稱",
             placeholder="輸入任務名稱..."
         )
 
+    # 狀態
     with c_status:
         new_status = st.selectbox(
             "📂 狀態",
             ["To Do", "In Executing", "Done"]
         )
 
+    # 負責人
     with c_owner:
         new_owner = st.text_input(
             "👤 負責人",
             placeholder="誰來負責..."
         )
 
+    # 日期時間
+    new_datetime = st.datetime_input(
+        "🕒 時間",
+        value=datetime.now()
+    )
+
     submit_btn = st.form_submit_button("✅ 確認指派並同步雲端")
 
+# ==========================================
 # 新增資料
+# ==========================================
+
 if submit_btn and new_title and new_owner:
 
     new_data = {
+        "department": new_department,
+        "customer": new_customer,
+        "datetime": new_datetime.strftime("%Y-%m-%d %H:%M"),
         "title": new_title,
         "status": new_status,
         "owner": new_owner
@@ -98,7 +137,18 @@ def render_tasks(task_df, column_name):
             with st.container(border=True):
 
                 st.write(f"### {row['title']}")
+
+                # 顯示部門
+                st.caption(f"🏢 部門：{row.get('department', '')}")
+
+                # 顯示客戶
+                st.caption(f"🏭 客戶：{row.get('customer', '')}")
+
+                # 顯示負責人
                 st.caption(f"👤 負責人：{row['owner']}")
+
+                # 顯示時間
+                st.caption(f"🕒 時間：{row.get('datetime', '')}")
 
                 # 修改狀態
                 new_status = st.selectbox(
