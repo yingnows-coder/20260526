@@ -1,2 +1,6 @@
 streamlit
-st-gsheets-connection
+pandas
+streamlit-gsheets
+plotly
+gspread
+oauth2client
