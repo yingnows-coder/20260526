@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from st_gsheets_connection import GSheetsConnection
+from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 
 # ==========================================
@@ -9,7 +9,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📌 企業級 Trello 雲端管理系統")
+st.title("📌 階段五企業版：雲端 Trello 管理系統")
 st.caption("edit by 闕河正")
 
 # ==========================================
@@ -20,10 +20,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 df = conn.read(worksheet="Tasks", ttl=0)
 
-# ==========================================
-# 初始化
-# ==========================================
-
+# 初始化欄位
 if df.empty:
 
     df = pd.DataFrame(columns=[
@@ -38,114 +35,50 @@ if df.empty:
     ])
 
 # ==========================================
-# 搜尋功能
-# ==========================================
-
-st.sidebar.title("🔍 搜尋任務")
-
-search_text = st.sidebar.text_input(
-    "輸入關鍵字",
-    placeholder="搜尋任務/客戶/負責人"
-)
-
-# 搜尋過濾
-if search_text:
-
-    df = df[
-        df.astype(str)
-        .apply(lambda row: row.str.contains(search_text, case=False).any(), axis=1)
-    ]
-
-# ==========================================
-# KPI 統計
-# ==========================================
-
-st.write("## 📈 KPI 統計")
-
-total_tasks = len(df)
-
-done_tasks = len(df[df["status"] == "Done"])
-
-todo_tasks = len(df[df["status"] == "To Do"])
-
-executing_tasks = len(df[df["status"] == "In Executing"])
-
-completion_rate = 0
-
-if total_tasks > 0:
-    completion_rate = round((done_tasks / total_tasks) * 100, 1)
-
-k1, k2, k3, k4 = st.columns(4)
-
-k1.metric("📌 總任務", total_tasks)
-k2.metric("🟢 已完成", done_tasks)
-k3.metric("🟠 執行中", executing_tasks)
-k4.metric("✅ 完成率", f"{completion_rate}%")
-
-# ==========================================
-# KPI 圖表
-# ==========================================
-
-chart_df = pd.DataFrame({
-    "狀態": ["To Do", "In Executing", "Done"],
-    "數量": [todo_tasks, executing_tasks, done_tasks]
-})
-
-fig = px.pie(
-    chart_df,
-    names="狀態",
-    values="數量",
-    title="📊 任務狀態分布"
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-st.write("---")
-
-# ==========================================
-# 新增任務
+# 新增任務區
 # ==========================================
 
 st.write("## 📝 建立新任務")
 
 with st.form("task_form", clear_on_submit=True):
 
+    # 第一列
     c1, c2 = st.columns([1, 2])
 
     with c1:
-
         new_department = st.selectbox(
             "🏢 部門",
             ["業務", "生產", "驗收", "售服"]
         )
 
     with c2:
-
         new_customer = st.text_input(
-            "🏭 客戶資訊"
+            "🏭 客戶資訊",
+            placeholder="請輸入客戶名稱"
         )
 
+    # 第二列
     c3, c4, c5 = st.columns([2, 1, 1])
 
     with c3:
-
         new_title = st.text_input(
-            "📌 任務名稱"
+            "📌 任務名稱",
+            placeholder="請輸入任務..."
         )
 
     with c4:
-
         new_status = st.selectbox(
             "📂 狀態",
             ["To Do", "In Executing", "Done"]
         )
 
     with c5:
-
         new_owner = st.text_input(
-            "👤 負責人"
+            "👤 負責人",
+            placeholder="輸入負責人"
         )
 
+    # 預計完成時間
     new_due_time = st.datetime_input(
         "⏰ 預計完成時間",
         value=datetime.now()
@@ -154,7 +87,7 @@ with st.form("task_form", clear_on_submit=True):
     submit_btn = st.form_submit_button("✅ 建立任務")
 
 # ==========================================
-# 建立資料
+# 建立任務
 # ==========================================
 
 if submit_btn and new_title and new_owner:
@@ -168,8 +101,14 @@ if submit_btn and new_title and new_owner:
         "title": new_title,
         "status": new_status,
         "owner": new_owner,
+
+        # 自動建立時間
         "created_time": current_time,
+
+        # 預計完成時間
         "due_time": new_due_time.strftime("%Y-%m-%d %H:%M:%S"),
+
+        # 初始更新時間
         "updated_time": current_time
     }
 
@@ -206,34 +145,7 @@ def render_tasks(task_df, column_name):
 
         for idx, row in task_df.iterrows():
 
-            # ==================================
-            # 逾期判斷
-            # ==================================
-
-            overdue = False
-
-            try:
-
-                due_time = datetime.strptime(
-                    str(row.get("due_time", "")),
-                    "%Y-%m-%d %H:%M:%S"
-                )
-
-                if due_time < datetime.now() and row["status"] != "Done":
-                    overdue = True
-
-            except:
-                pass
-
-            # ==================================
-            # 卡片
-            # ==================================
-
             with st.container(border=True):
-
-                # 逾期紅字
-                if overdue:
-                    st.error("🚨 任務已逾期")
 
                 st.write(f"### {row['title']}")
 
@@ -247,20 +159,7 @@ def render_tasks(task_df, column_name):
 
                 st.caption(f"🔄 最後更新：{row.get('updated_time', '')}")
 
-                # 剩餘時間
-                try:
-
-                    remaining = due_time - datetime.now()
-
-                    days = remaining.days
-
-                    if days >= 0 and not overdue:
-                        st.info(f"⏳ 剩餘 {days} 天")
-
-                except:
-                    pass
-
-                # 狀態更新
+                # 更新狀態
                 new_status = st.selectbox(
                     "更新狀態",
                     ["To Do", "In Executing", "Done"],
@@ -273,8 +172,10 @@ def render_tasks(task_df, column_name):
 
                     current_update_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+                    # 更新狀態
                     df.loc[idx, "status"] = new_status
 
+                    # 更新最後時間
                     df.loc[idx, "updated_time"] = current_update_time
 
                     conn.update(
@@ -286,7 +187,7 @@ def render_tasks(task_df, column_name):
 
                     st.rerun()
 
-                # 刪除
+                # 刪除按鈕
                 if st.button("🗑️ 刪除任務", key=f"delete_{idx}"):
 
                     updated_df = df.drop(idx).reset_index(drop=True)
@@ -301,7 +202,6 @@ def render_tasks(task_df, column_name):
                     st.rerun()
 
     else:
-
         st.info(f"目前沒有 {column_name} 任務")
 
 # ==========================================
