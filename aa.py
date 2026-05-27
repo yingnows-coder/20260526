@@ -12,16 +12,6 @@ st.set_page_config(layout="wide")
 st.title("📌 企業版：雲端 Trello 管理系統")
 st.caption("edit by 林溫城")
 
-# 右上按鈕
-top1, top2 = st.columns([8,1])
-
-with top2:
-    st.page_link(
-        "pages/bb.py",
-        label="📊 BB頁面",
-        icon="🚀"
-    )
-
 # ==========================================
 # Google Sheets
 # ==========================================
