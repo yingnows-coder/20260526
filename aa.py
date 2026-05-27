@@ -9,8 +9,8 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("📌 階段五企業版：雲端 Trello 管理系統")
-st.caption("edit by 闕河正")
+st.title("📌 震唯機械階段五企業版：雲端 Trello 管理系統")
+st.caption("edit by 林溫城")
 
 # ==========================================
 # Google Sheets
