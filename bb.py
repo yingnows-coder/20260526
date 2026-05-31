@@ -14,7 +14,7 @@ st.title("📌 企業版：雲端 Trello 管理系統")
 st.caption("edit by 林溫城")
 
 # ==========================================
-# BB頁面導航（已修正 Cloud 穩定寫法）
+# BB頁面導航
 # ==========================================
 
 top1, top2 = st.columns([8,1])
@@ -28,24 +28,25 @@ with top2:
 # ==========================================
 
 conn = st.connection("gsheets", type=GSheetsConnection)
-df = conn.read(worksheet="Tasks", ttl=0)
 
-# 初始化欄位
+df = conn.read(worksheet="Tasks", ttl=0)
+history_df = conn.read(worksheet="Data", ttl=0)
+
+# ==========================================
+# 初始化
+# ==========================================
+
 if df.empty:
     df = pd.DataFrame(columns=[
-        "id",
-        "department",
-        "customer",
-        "title",
-        "status",
-        "owner",
-        "created_time",
-        "due_time",
-        "updated_time"
+        "id","department","customer","title","status",
+        "owner","created_time","due_time","updated_time"
     ])
 else:
     if "id" not in df.columns:
         df["id"] = [str(uuid.uuid4()) for _ in range(len(df))]
+
+if history_df is None:
+    history_df = pd.DataFrame()
 
 # ==========================================
 # 新增任務
@@ -78,10 +79,6 @@ with st.form("task_form", clear_on_submit=True):
 
     submit_btn = st.form_submit_button("✅ 建立任務")
 
-# ==========================================
-# 建立任務
-# ==========================================
-
 if submit_btn and new_title and new_owner:
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -108,21 +105,19 @@ if submit_btn and new_title and new_owner:
 st.write("---")
 
 # ==========================================
-# 看板
+# 📊 主功能區（目前 + 歷史）
 # ==========================================
 
-st.write("## 📊 任務管理看板")
-
-col1, col2, col3 = st.columns(3)
+tab1, tab2 = st.tabs(["📌 目前任務", "📦 歷史紀錄"])
 
 # ==========================================
 # 卡片函式
 # ==========================================
 
-def render_tasks(task_df, column_name):
+def render_tasks(task_df):
 
     if task_df.empty:
-        st.info(f"目前沒有 {column_name} 任務")
+        st.info("沒有資料")
         return
 
     for _, row in task_df.iterrows():
@@ -131,7 +126,8 @@ def render_tasks(task_df, column_name):
 
         with st.container(border=True):
 
-            st.write(f"### {row['title']}")
+            st.write(f"### {row.get('title','')}")
+
             st.caption(f"🏢 部門：{row.get('department','')}")
             st.caption(f"🏭 客戶：{row.get('customer','')}")
             st.caption(f"👤 負責人：{row.get('owner','')}")
@@ -139,7 +135,6 @@ def render_tasks(task_df, column_name):
             st.caption(f"⏰ 預計完成：{row.get('due_time','')}")
             st.caption(f"🔄 更新時間：{row.get('updated_time','')}")
 
-            # 狀態更新
             new_status = st.selectbox(
                 "更新狀態",
                 ["To Do", "In Executing", "Done"],
@@ -158,35 +153,34 @@ def render_tasks(task_df, column_name):
                 st.rerun()
 
             # ==========================================
-            # 封存
+            # 封存 → 移到歷史 Data
             # ==========================================
 
             if row["status"] == "Done":
 
-                if st.button("📦 封存", key=f"archive_{row['id']}"):
-
-                    data_df = conn.read(worksheet="Data", ttl=0)
-
-                    if data_df.empty:
-                        data_df = pd.DataFrame(columns=df.columns)
+                if st.button("📦 封存到歷史", key=f"archive_{row['id']}"):
 
                     row_data = df.loc[real_idx]
 
-                    data_df = pd.concat([data_df, pd.DataFrame([row_data])], ignore_index=True)
+                    history_df_local = conn.read(worksheet="Data", ttl=0)
 
-                    conn.update(worksheet="Data", data=data_df)
+                    if history_df_local.empty:
+                        history_df_local = pd.DataFrame(columns=df.columns)
+
+                    history_df_local = pd.concat(
+                        [history_df_local, pd.DataFrame([row_data])],
+                        ignore_index=True
+                    )
+
+                    conn.update(worksheet="Data", data=history_df_local)
 
                     df.drop(real_idx, inplace=True)
                     df.reset_index(drop=True, inplace=True)
 
                     conn.update(worksheet="Tasks", data=df)
 
-                    st.success("✅ 已封存")
+                    st.success("✅ 已移動到歷史紀錄")
                     st.rerun()
-
-            # ==========================================
-            # 刪除
-            # ==========================================
 
             if st.button("🗑️ 刪除", key=f"delete_{row['id']}"):
 
@@ -199,17 +193,48 @@ def render_tasks(task_df, column_name):
                 st.rerun()
 
 # ==========================================
-# 分欄顯示
+# 📌 目前任務
 # ==========================================
 
-with col1:
-    st.markdown("## 🔴 To Do")
-    render_tasks(df[df["status"] == "To Do"], "待辦")
+with tab1:
 
-with col2:
-    st.markdown("## 🟠 In Executing")
-    render_tasks(df[df["status"] == "In Executing"], "執行中")
+    st.subheader("進行中任務")
 
-with col3:
-    st.markdown("## 🟢 Done")
-    render_tasks(df[df["status"] == "Done"], "已完成")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("## 🔴 To Do")
+        render_tasks(df[df["status"] == "To Do"])
+
+    with col2:
+        st.markdown("## 🟠 In Executing")
+        render_tasks(df[df["status"] == "In Executing"])
+
+    with col3:
+        st.markdown("## 🟢 Done")
+        render_tasks(df[df["status"] == "Done"])
+
+# ==========================================
+# 📦 歷史紀錄
+# ==========================================
+
+with tab2:
+
+    st.subheader("📦 任務歷史紀錄")
+
+    if history_df.empty:
+        st.info("目前沒有歷史資料")
+    else:
+        st.dataframe(history_df, use_container_width=True)
+
+        search = st.text_input("🔍 搜尋歷史紀錄")
+
+        if search:
+            filtered = history_df[
+                history_df.astype(str).apply(
+                    lambda x: x.str.contains(search, case=False, na=False)
+                ).any(axis=1)
+            ]
+
+            st.write(f"搜尋結果：{len(filtered)} 筆")
+            st.dataframe(filtered, use_container_width=True)
