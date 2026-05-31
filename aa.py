@@ -20,8 +20,7 @@ st.caption("edit by 林溫城")
 top1, top2 = st.columns([8,1])
 
 with top2:
-    if st.button("📊 BB頁面"):
-        st.switch_page("pages/bb.py")
+    st.link_button("📊 BB頁面", "https://aazzyybb.streamlit.app/")
 
 # ==========================================
 # Google Sheets
