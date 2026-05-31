@@ -13,14 +13,15 @@ st.set_page_config(layout="wide")
 st.title("📌 企業版：雲端 Trello 管理系統")
 st.caption("edit by 林溫城")
 
+# ==========================================
+# BB頁面導航（已修正 Cloud 穩定寫法）
+# ==========================================
+
 top1, top2 = st.columns([8,1])
 
 with top2:
-    st.page_link(
-        "pages/bb.py",
-        label="📊 BB頁面",
-        icon="🚀"
-    )
+    if st.button("📊 BB頁面"):
+        st.switch_page("pages/bb.py")
 
 # ==========================================
 # Google Sheets
@@ -43,7 +44,6 @@ if df.empty:
         "updated_time"
     ])
 else:
-    # 確保 id 存在
     if "id" not in df.columns:
         df["id"] = [str(uuid.uuid4()) for _ in range(len(df))]
 
@@ -84,7 +84,7 @@ with st.form("task_form", clear_on_submit=True):
 
 if submit_btn and new_title and new_owner:
 
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     new_data = {
         "id": str(uuid.uuid4()),
@@ -93,9 +93,9 @@ if submit_btn and new_title and new_owner:
         "title": new_title,
         "status": new_status,
         "owner": new_owner,
-        "created_time": current_time,
+        "created_time": now,
         "due_time": new_due_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "updated_time": current_time
+        "updated_time": now
     }
 
     df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
@@ -116,7 +116,7 @@ st.write("## 📊 任務管理看板")
 col1, col2, col3 = st.columns(3)
 
 # ==========================================
-# 卡片渲染
+# 卡片函式
 # ==========================================
 
 def render_tasks(task_df, column_name):
@@ -132,7 +132,6 @@ def render_tasks(task_df, column_name):
         with st.container(border=True):
 
             st.write(f"### {row['title']}")
-
             st.caption(f"🏢 部門：{row.get('department','')}")
             st.caption(f"🏭 客戶：{row.get('customer','')}")
             st.caption(f"👤 負責人：{row.get('owner','')}")
@@ -158,6 +157,10 @@ def render_tasks(task_df, column_name):
                 st.success("✅ 已更新")
                 st.rerun()
 
+            # ==========================================
+            # 封存
+            # ==========================================
+
             if row["status"] == "Done":
 
                 if st.button("📦 封存", key=f"archive_{row['id']}"):
@@ -180,6 +183,10 @@ def render_tasks(task_df, column_name):
 
                     st.success("✅ 已封存")
                     st.rerun()
+
+            # ==========================================
+            # 刪除
+            # ==========================================
 
             if st.button("🗑️ 刪除", key=f"delete_{row['id']}"):
 
