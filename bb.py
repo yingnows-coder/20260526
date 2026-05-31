@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
-import gspread
+from streamlit_gsheets import GSheetsConnection
+from datetime import datetime
+import uuid
 
 # ==========================================
 # 基本設定
@@ -8,116 +10,206 @@ import gspread
 
 st.set_page_config(layout="wide")
 
-st.title("📊 BB頁面 - Google Sheets 歷史紀錄")
+st.title("📌 企業版：雲端 Trello 管理系統")
+st.caption("edit by 林溫城")
 
 # ==========================================
-# Google Sheets 連線（手動版）
+# BB頁面導航（已修正 Cloud 穩定寫法）
 # ==========================================
 
-SHEET_ID = "你的GoogleSheetID"  # 👈 改這裡
+top1, top2 = st.columns([8,1])
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-
-# ⚠️ Cloud 必須用公開或 service account（這裡用簡化公開讀法）
-
-gc = gspread.service_account()
-
-sh = gc.open_by_key(SHEET_ID)
+with top2:
+    if st.button("📊 BB頁面"):
+        st.switch_page("pages/bb.py")
 
 # ==========================================
-# 讀取資料
+# Google Sheets
 # ==========================================
 
-try:
-    tasks_ws = sh.worksheet("Tasks")
-    history_ws = sh.worksheet("Data")
+conn = st.connection("gsheets", type=GSheetsConnection)
+df = conn.read(worksheet="Tasks", ttl=0)
 
-    tasks_df = pd.DataFrame(tasks_ws.get_all_records())
-    history_df = pd.DataFrame(history_ws.get_all_records())
-
-except Exception as e:
-    st.error("❌ 無法讀取 Google Sheet，請檢查權限或 sheet 名稱")
-    st.stop()
-
-# ==========================================
-# 安全處理
-# ==========================================
-
-if tasks_df.empty:
-    tasks_df = pd.DataFrame()
-
-if history_df.empty:
-    history_df = pd.DataFrame()
-
-# ==========================================
-# UI
-# ==========================================
-
-tab1, tab2, tab3 = st.tabs(["📌 任務", "📦 歷史", "📊 統計"])
+# 初始化欄位
+if df.empty:
+    df = pd.DataFrame(columns=[
+        "id",
+        "department",
+        "customer",
+        "title",
+        "status",
+        "owner",
+        "created_time",
+        "due_time",
+        "updated_time"
+    ])
+else:
+    if "id" not in df.columns:
+        df["id"] = [str(uuid.uuid4()) for _ in range(len(df))]
 
 # ==========================================
-# 📌 任務
+# 新增任務
 # ==========================================
 
-with tab1:
+st.write("## 📝 建立新任務")
 
-    st.subheader("目前任務")
+with st.form("task_form", clear_on_submit=True):
 
-    st.dataframe(tasks_df, use_container_width=True)
+    c1, c2 = st.columns([1, 2])
 
-    search = st.text_input("搜尋任務")
+    with c1:
+        new_department = st.selectbox("🏢 部門", ["業務", "生產", "驗收", "售服"])
 
-    if search and not tasks_df.empty:
-        filtered = tasks_df[
-            tasks_df.astype(str).apply(
-                lambda x: x.str.contains(search, case=False, na=False)
-            ).any(axis=1)
-        ]
+    with c2:
+        new_customer = st.text_input("🏭 客戶資訊")
 
-        st.write(f"搜尋結果：{len(filtered)} 筆")
-        st.dataframe(filtered, use_container_width=True)
+    c3, c4, c5 = st.columns([2, 1, 1])
 
-# ==========================================
-# 📦 歷史
-# ==========================================
+    with c3:
+        new_title = st.text_input("📌 任務名稱")
 
-with tab2:
+    with c4:
+        new_status = st.selectbox("📂 狀態", ["To Do", "In Executing", "Done"])
 
-    st.subheader("歷史紀錄")
+    with c5:
+        new_owner = st.text_input("👤 負責人")
 
-    st.dataframe(history_df, use_container_width=True)
+    new_due_time = st.datetime_input("⏰ 預計完成時間", value=datetime.now())
 
-    search2 = st.text_input("搜尋歷史")
-
-    if search2 and not history_df.empty:
-        filtered2 = history_df[
-            history_df.astype(str).apply(
-                lambda x: x.str.contains(search2, case=False, na=False)
-            ).any(axis=1)
-        ]
-
-        st.write(f"搜尋結果：{len(filtered2)} 筆")
-        st.dataframe(filtered2, use_container_width=True)
+    submit_btn = st.form_submit_button("✅ 建立任務")
 
 # ==========================================
-# 📊 統計
+# 建立任務
 # ==========================================
 
-with tab3:
+if submit_btn and new_title and new_owner:
 
-    st.subheader("統計")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if not tasks_df.empty:
+    new_data = {
+        "id": str(uuid.uuid4()),
+        "department": new_department,
+        "customer": new_customer,
+        "title": new_title,
+        "status": new_status,
+        "owner": new_owner,
+        "created_time": now,
+        "due_time": new_due_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_time": now
+    }
 
-        col1, col2, col3 = st.columns(3)
+    df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
 
-        with col1:
-            st.metric("To Do", len(tasks_df[tasks_df["status"] == "To Do"]))
+    conn.update(worksheet="Tasks", data=df)
 
-        with col2:
-            st.metric("Executing", len(tasks_df[tasks_df["status"] == "In Executing"]))
+    st.success("✅ 任務建立成功")
+    st.rerun()
 
-        with col3:
-            st.metric("Done", len(tasks_df[tasks_df["status"] == "Done"]))
+st.write("---")
 
-    st.metric("歷史總數", len(history_df))
+# ==========================================
+# 看板
+# ==========================================
+
+st.write("## 📊 任務管理看板")
+
+col1, col2, col3 = st.columns(3)
+
+# ==========================================
+# 卡片函式
+# ==========================================
+
+def render_tasks(task_df, column_name):
+
+    if task_df.empty:
+        st.info(f"目前沒有 {column_name} 任務")
+        return
+
+    for _, row in task_df.iterrows():
+
+        real_idx = df[df["id"] == row["id"]].index[0]
+
+        with st.container(border=True):
+
+            st.write(f"### {row['title']}")
+            st.caption(f"🏢 部門：{row.get('department','')}")
+            st.caption(f"🏭 客戶：{row.get('customer','')}")
+            st.caption(f"👤 負責人：{row.get('owner','')}")
+            st.caption(f"🕒 建立時間：{row.get('created_time','')}")
+            st.caption(f"⏰ 預計完成：{row.get('due_time','')}")
+            st.caption(f"🔄 更新時間：{row.get('updated_time','')}")
+
+            # 狀態更新
+            new_status = st.selectbox(
+                "更新狀態",
+                ["To Do", "In Executing", "Done"],
+                index=["To Do", "In Executing", "Done"].index(row["status"]),
+                key=f"status_{row['id']}"
+            )
+
+            if st.button("💾 更新", key=f"update_{row['id']}"):
+
+                df.loc[real_idx, "status"] = new_status
+                df.loc[real_idx, "updated_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                conn.update(worksheet="Tasks", data=df)
+
+                st.success("✅ 已更新")
+                st.rerun()
+
+            # ==========================================
+            # 封存
+            # ==========================================
+
+            if row["status"] == "Done":
+
+                if st.button("📦 封存", key=f"archive_{row['id']}"):
+
+                    data_df = conn.read(worksheet="Data", ttl=0)
+
+                    if data_df.empty:
+                        data_df = pd.DataFrame(columns=df.columns)
+
+                    row_data = df.loc[real_idx]
+
+                    data_df = pd.concat([data_df, pd.DataFrame([row_data])], ignore_index=True)
+
+                    conn.update(worksheet="Data", data=data_df)
+
+                    df.drop(real_idx, inplace=True)
+                    df.reset_index(drop=True, inplace=True)
+
+                    conn.update(worksheet="Tasks", data=df)
+
+                    st.success("✅ 已封存")
+                    st.rerun()
+
+            # ==========================================
+            # 刪除
+            # ==========================================
+
+            if st.button("🗑️ 刪除", key=f"delete_{row['id']}"):
+
+                df.drop(real_idx, inplace=True)
+                df.reset_index(drop=True, inplace=True)
+
+                conn.update(worksheet="Tasks", data=df)
+
+                st.warning("⚠️ 已刪除")
+                st.rerun()
+
+# ==========================================
+# 分欄顯示
+# ==========================================
+
+with col1:
+    st.markdown("## 🔴 To Do")
+    render_tasks(df[df["status"] == "To Do"], "待辦")
+
+with col2:
+    st.markdown("## 🟠 In Executing")
+    render_tasks(df[df["status"] == "In Executing"], "執行中")
+
+with col3:
+    st.markdown("## 🟢 Done")
+    render_tasks(df[df["status"] == "Done"], "已完成")
