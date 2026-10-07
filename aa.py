@@ -1889,945 +1889,578 @@ with tab_board:
 
 
 # ################################################################
-# TAB 3：報價產生器
+# TAB 3：報價產生器（簡化正式版）
 # ################################################################
 
 with tab_quote:
 
-    st.subheader(
-        "💰 RFQ 報價產生器"
-    )
+    st.subheader("💰 RFQ 報價產生器")
+    st.caption("簡化流程：RFQ → 商務條件 → 報價品項 → 規格 → 備註 → 正式報價")
 
+    if "quote_items" not in st.session_state:
+        st.session_state.quote_items = [
+            {"品名": "", "規格/說明": "", "數量": 1.0, "單位": "台", "單價": 0.0}
+        ]
+
+    if "generated_quote" not in st.session_state:
+        st.session_state.generated_quote = None
+
+    # 常用選單：可自行增修
+    VALIDITY_OPTIONS = ["一個月", "30天", "60天", "90天", "自訂"]
+    PAYMENT_OPTIONS = [
+        "訂金30%現金，餘款70%出貨前付清",
+        "訂金50%，餘款50%出貨前付清",
+        "月結30天",
+        "月結60天",
+        "自訂",
+    ]
+    TRADE_OPTIONS = ["FOR TAIWAN", "EXW", "FOB", "CIF", "自訂"]
+    LEAD_OPTIONS = [
+        "收到訂金後約30個工作天交貨",
+        "收到訂金後約45個工作天交貨",
+        "收到訂金後約60個工作天交貨",
+        "自訂",
+    ]
+    UNIT_OPTIONS = ["台", "組", "套", "件", "PCS", "SET"]
+
+    PRODUCT_SPECS = {
+        "不顯示規格": [],
+        "JCP 90 鐵屑擠壓機": [
+            "壓縮能力：100噸",
+            "最大使用壓力：190 kg/cm²",
+            "產出壓縮塊：Ø90 mm × 70L",
+            "一次循環時間：約30秒（不含入料時間）",
+            "零件保固一年（消耗品除外）",
+        ],
+        "KLFM-200 自動鐵屑抬舉機": [
+            "抬升高度：1200 mm",
+            "馬力：1/2 HP",
+            "減速比：200:1",
+            "PLC 自動控制上下料",
+            "具行程保護及安全門鎖保護",
+        ],
+        "自訂規格": [],
+    }
 
     if df.empty:
-
-        st.info(
-            "目前沒有 RFQ，請先建立 RFQ。"
-        )
-
+        st.info("目前沒有 RFQ，請先建立 RFQ。")
     else:
-
-        rfq_options = (
-
-            df["RFQ_ID"]
-            .dropna()
-            .astype(str)
-            .tolist()
-
-        )
-
+        rfq_options = df["RFQ_ID"].dropna().astype(str).tolist()
 
         if not rfq_options:
-
-            st.info(
-                "目前沒有有效 RFQ_ID。"
-            )
-
+            st.info("目前沒有有效 RFQ_ID。")
         else:
+            # ---------------------------------------------------------
+            # 1. RFQ
+            # ---------------------------------------------------------
+            st.markdown("### 1️⃣ 選擇 RFQ")
 
             selected_rfq = st.selectbox(
-
-                "選擇 RFQ",
-
-                rfq_options
-
+                "RFQ",
+                rfq_options,
+                key="quote_rfq_select",
             )
 
-
-            rfq_matches = df[
-
-                df["RFQ_ID"].astype(str)
-                == str(selected_rfq)
-
-            ]
-
+            rfq_matches = df[df["RFQ_ID"].astype(str) == str(selected_rfq)]
 
             if rfq_matches.empty:
-
-                st.error(
-                    "❌ 找不到選擇的 RFQ"
-                )
-
+                st.error("❌ 找不到選擇的 RFQ")
             else:
-
                 rfq = rfq_matches.iloc[0]
+                rfq_customer = str(rfq.get("customer", ""))
+                rfq_product = str(rfq.get("title", ""))
 
+                c1, c2, c3 = st.columns(3)
+                c1.metric("RFQ", selected_rfq)
+                c2.metric("客戶", rfq_customer)
+                c3.metric("詢價名稱", rfq_product)
 
-                # =================================================
-                # RFQ 資料
-                # =================================================
-
-                st.markdown(
-                    "### 📋 RFQ 基本資料"
-                )
-
-
-                c1, c2, c3, c4 = st.columns(4)
-
-
-                with c1:
-
-                    st.metric(
-                        "RFQ",
-                        str(
-                            rfq.get(
-                                "RFQ_ID",
-                                ""
-                            )
-                        )
-                    )
-
-
-                with c2:
-
-                    st.metric(
-                        "客戶",
-                        str(
-                            rfq.get(
-                                "customer",
-                                ""
-                            )
-                        )
-                    )
-
-
-                with c3:
-
-                    st.metric(
-                        "詢價名稱",
-                        str(
-                            rfq.get(
-                                "title",
-                                ""
-                            )
-                        )
-                    )
-
-
-                with c4:
-
-                    st.metric(
-                        "目前狀態",
-                        str(
-                            rfq.get(
-                                "status",
-                                ""
-                            )
-                        )
-                    )
-
-
+                # -----------------------------------------------------
+                # 2. 商務條件
+                # -----------------------------------------------------
                 st.divider()
-
-
-                # =================================================
-                # 報價基本資料
-                # =================================================
-
-                st.markdown(
-                    "### 🧾 報價基本資料"
-                )
-
+                st.markdown("### 2️⃣ 報價基本資料 / 商務條件")
 
                 c1, c2, c3 = st.columns(3)
 
-
                 with c1:
-
-                    quote_version = st.text_input(
-                        "報價版本",
-                        value="V1"
-                    )
-
-
                     quote_date = st.date_input(
                         "報價日期",
-                        value=datetime.now().date()
+                        value=datetime.now().date(),
+                        key="simple_quote_date",
                     )
-
-
-                    quantity = st.number_input(
-                        "數量",
-                        min_value=1.0,
-                        value=1.0,
-                        step=1.0
+                    contact_person = st.text_input(
+                        "Attn / 聯絡人",
+                        key="simple_contact_person",
                     )
-
-
-                with c2:
-
                     currency = st.selectbox(
-
                         "幣別",
-
-                        [
-                            "TWD",
-                            "USD",
-                            "EUR",
-                            "JPY",
-                            "CNY"
-                        ]
-
+                        ["TWD", "USD", "EUR", "JPY", "CNY"],
+                        key="simple_currency",
                     )
-
-
-                    unit = st.text_input(
-                        "單位",
-                        value="PCS"
-                    )
-
-
-                    drawing_version = st.text_input(
-                        "圖面版本"
-                    )
-
-
-                with c3:
-
-                    payment_terms = st.text_input(
-                        "付款條件"
-                    )
-
-
-                    incoterms = st.text_input(
-                        "交易條件"
-                    )
-
-
-                    delivery = st.text_input(
-                        "交貨地"
-                    )
-
-
-                # =================================================
-                # 成本
-                # =================================================
-
-                st.markdown(
-                    "### 💵 成本"
-                )
-
-
-                c1, c2, c3, c4 = st.columns(4)
-
-
-                with c1:
-
-                    material_cost = st.number_input(
-                        "材料成本",
-                        min_value=0.0,
-                        value=0.0,
-                        step=100.0
-                    )
-
-
-                    processing_cost = st.number_input(
-                        "加工成本",
-                        min_value=0.0,
-                        value=0.0,
-                        step=100.0
-                    )
-
 
                 with c2:
-
-                    outsourcing_cost = st.number_input(
-                        "外包成本",
-                        min_value=0.0,
-                        value=0.0,
-                        step=100.0
+                    validity_choice = st.selectbox(
+                        "有效期限",
+                        VALIDITY_OPTIONS,
+                        key="simple_validity_choice",
                     )
+                    validity_custom = ""
+                    if validity_choice == "自訂":
+                        validity_custom = st.text_input(
+                            "自訂有效期限",
+                            key="simple_validity_custom",
+                        )
 
-
-                    surface_cost = st.number_input(
-                        "表面處理",
-                        min_value=0.0,
-                        value=0.0,
-                        step=100.0
+                    payment_choice = st.selectbox(
+                        "付款條件",
+                        PAYMENT_OPTIONS,
+                        key="simple_payment_choice",
                     )
-
+                    payment_custom = ""
+                    if payment_choice == "自訂":
+                        payment_custom = st.text_input(
+                            "自訂付款條件",
+                            key="simple_payment_custom",
+                        )
 
                 with c3:
-
-                    packing_cost = st.number_input(
-                        "包裝成本",
-                        min_value=0.0,
-                        value=0.0,
-                        step=100.0
+                    trade_choice = st.selectbox(
+                        "報價條件",
+                        TRADE_OPTIONS,
+                        key="simple_trade_choice",
                     )
+                    trade_custom = ""
+                    if trade_choice == "自訂":
+                        trade_custom = st.text_input(
+                            "自訂報價條件",
+                            key="simple_trade_custom",
+                        )
 
-
-                    transport_cost = st.number_input(
-                        "運輸成本",
-                        min_value=0.0,
-                        value=0.0,
-                        step=100.0
+                    lead_choice = st.selectbox(
+                        "交貨日期",
+                        LEAD_OPTIONS,
+                        key="simple_lead_choice",
                     )
-
-
-                with c4:
-
-                    other_cost = st.number_input(
-                        "其他成本",
-                        min_value=0.0,
-                        value=0.0,
-                        step=100.0
-                    )
-
-
-                # =================================================
-                # 計算
-                # =================================================
-
-                total_cost = (
-
-                    material_cost
-                    + processing_cost
-                    + outsourcing_cost
-                    + surface_cost
-                    + packing_cost
-                    + transport_cost
-                    + other_cost
-
-                )
-
-
-                st.markdown(
-                    "### 📈 報價參數"
-                )
-
-
-                c1, c2, c3, c4 = st.columns(4)
-
-
-                with c1:
-
-                    management_rate = st.number_input(
-                        "管理費 %",
-                        min_value=0.0,
-                        max_value=100.0,
-                        value=0.0,
-                        step=1.0
-                    )
-
-
-                with c2:
-
-                    profit_rate = st.number_input(
-                        "利潤率 %",
-                        min_value=0.0,
-                        max_value=100.0,
-                        value=20.0,
-                        step=1.0
-                    )
-
-
-                with c3:
-
-                    discount = st.number_input(
-                        "折扣金額",
-                        min_value=0.0,
-                        value=0.0,
-                        step=100.0
-                    )
-
-
-                with c4:
-
-                    tax_rate = st.number_input(
-                        "稅率 %",
-                        min_value=0.0,
-                        max_value=100.0,
-                        value=5.0,
-                        step=1.0
-                    )
-
-
-                management_cost = (
-
-                    total_cost
-                    * management_rate
-                    / 100
-
-                )
-
-
-                profit_base = (
-
-                    total_cost
-                    + management_cost
-
-                )
-
-
-                profit_amount = (
-
-                    profit_base
-                    * profit_rate
-                    / 100
-
-                )
-
-
-                before_discount = (
-
-                    profit_base
-                    + profit_amount
-
-                )
-
-
-                quote_total = max(
-
-                    0,
-
-                    before_discount
-                    - discount
-
-                )
-
-
-                if quantity > 0:
-
-                    quote_unit_price = (
-
-                        quote_total
-                        / quantity
-
-                    )
-
-                else:
-
-                    quote_unit_price = 0
-
-
-                tax_amount = (
-
-                    quote_total
-                    * tax_rate
-                    / 100
-
-                )
-
-
-                grand_total = (
-
-                    quote_total
-                    + tax_amount
-
-                )
-
-
-                gross_margin = 0
-
-
-                if quote_total > 0:
-
-                    gross_margin = (
-
-                        quote_total
-                        - total_cost
-
-                    ) / quote_total * 100
-
-
-                # =================================================
-                # 報價結果
-                # =================================================
-
+                    lead_custom = ""
+                    if lead_choice == "自訂":
+                        lead_custom = st.text_input(
+                            "自訂交期",
+                            key="simple_lead_custom",
+                        )
+
+                validity = validity_custom.strip() if validity_choice == "自訂" else validity_choice
+                payment_terms = payment_custom.strip() if payment_choice == "自訂" else payment_choice
+                trade_terms = trade_custom.strip() if trade_choice == "自訂" else trade_choice
+                lead_time = lead_custom.strip() if lead_choice == "自訂" else lead_choice
+
+                validity = validity or "待確認"
+                payment_terms = payment_terms or "待確認"
+                trade_terms = trade_terms or "待確認"
+                lead_time = lead_time or "待確認"
+
+                # -----------------------------------------------------
+                # 3. 多品項
+                # -----------------------------------------------------
                 st.divider()
+                st.markdown("### 3️⃣ 報價內容")
+                st.caption("客戶版只顯示品名、規格/說明、數量、單位、單價與金額；成本與利潤不輸出。")
 
+                # 第一次選 RFQ 時，把詢價名稱帶入第一列
+                if (
+                    len(st.session_state.quote_items) == 1
+                    and not st.session_state.quote_items[0].get("品名", "").strip()
+                ):
+                    st.session_state.quote_items[0]["品名"] = rfq_product
 
-                st.markdown(
-                    "### 📊 報價結果"
+                item_df = pd.DataFrame(st.session_state.quote_items)
+
+                edited_items = st.data_editor(
+                    item_df,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "品名": st.column_config.TextColumn("品名", required=True),
+                        "規格/說明": st.column_config.TextColumn("規格/說明"),
+                        "數量": st.column_config.NumberColumn("數量", min_value=0.0, step=1.0),
+                        "單位": st.column_config.SelectboxColumn("單位", options=UNIT_OPTIONS),
+                        "單價": st.column_config.NumberColumn("單價", min_value=0.0, step=100.0, format="%.2f"),
+                    },
+                    key="quote_items_editor",
                 )
 
+                # 正規化並計算
+                for col in ["品名", "規格/說明", "單位"]:
+                    if col not in edited_items.columns:
+                        edited_items[col] = ""
+                for col in ["數量", "單價"]:
+                    if col not in edited_items.columns:
+                        edited_items[col] = 0.0
 
-                c1, c2, c3, c4 = st.columns(4)
+                edited_items["數量"] = pd.to_numeric(edited_items["數量"], errors="coerce").fillna(0.0)
+                edited_items["單價"] = pd.to_numeric(edited_items["單價"], errors="coerce").fillna(0.0)
+                edited_items["金額"] = edited_items["數量"] * edited_items["單價"]
 
+                st.session_state.quote_items = edited_items[
+                    ["品名", "規格/說明", "數量", "單位", "單價"]
+                ].to_dict("records")
 
-                with c1:
+                subtotal = float(edited_items["金額"].sum())
 
-                    st.metric(
-                        "總成本",
-                        f"{currency} "
-                        f"{money(total_cost)}"
+                tax_mode = st.radio(
+                    "營業稅",
+                    ["未稅報價（不含5%營業稅）", "加計5%營業稅"],
+                    horizontal=True,
+                    key="simple_tax_mode",
+                )
+                tax_rate = 5.0
+                tax_amount = subtotal * tax_rate / 100 if tax_mode == "加計5%營業稅" else 0.0
+                grand_total = subtotal + tax_amount
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("未稅合計", f"{currency} {money(subtotal)}")
+                m2.metric("營業稅", f"{currency} {money(tax_amount)}")
+                m3.metric("報價總額", f"{currency} {money(grand_total)}")
+
+                # -----------------------------------------------------
+                # 4. 規格
+                # -----------------------------------------------------
+                st.divider()
+                st.markdown("### 4️⃣ 產品規格")
+
+                spec_product = st.selectbox(
+                    "規格範本",
+                    list(PRODUCT_SPECS.keys()),
+                    key="simple_spec_product",
+                )
+
+                default_spec_text = "\n".join(PRODUCT_SPECS.get(spec_product, []))
+
+                if spec_product == "不顯示規格":
+                    specification = ""
+                    st.caption("此報價單不顯示設備規格。")
+                else:
+                    specification = st.text_area(
+                        "規格內容（可直接修改）",
+                        value=default_spec_text,
+                        height=160,
+                        key=f"simple_spec_text_{spec_product}",
                     )
 
+                # -----------------------------------------------------
+                # 5. 備註
+                # -----------------------------------------------------
+                st.divider()
+                st.markdown("### 5️⃣ 備註")
 
-                with c2:
-
-                    st.metric(
-                        "利潤",
-                        f"{currency} "
-                        f"{money(profit_amount)}"
+                b1, b2, b3 = st.columns(3)
+                with b1:
+                    note_tax = st.checkbox(
+                        "以上報價不含5%營業稅",
+                        value=(tax_mode == "未稅報價（不含5%營業稅）"),
+                        key="note_tax",
                     )
+                    note_pack = st.checkbox("以上報價不含包裝", value=True, key="note_pack")
+                with b2:
+                    note_shipping = st.checkbox("運費另計", key="note_shipping")
+                    note_install = st.checkbox("安裝費另計", key="note_install")
+                with b3:
+                    note_test = st.checkbox("試車費另計", key="note_test")
+                    note_other = st.checkbox("其他備註", key="note_other")
 
+                other_note = ""
+                if note_other:
+                    other_note = st.text_area("其他備註內容", key="simple_other_note")
 
-                with c3:
+                notes = []
+                if note_tax:
+                    notes.append("以上報價不含5%營業稅")
+                if note_pack:
+                    notes.append("以上報價不含包裝")
+                if note_shipping:
+                    notes.append("運費另計")
+                if note_install:
+                    notes.append("安裝費另計")
+                if note_test:
+                    notes.append("試車費另計")
+                if other_note.strip():
+                    notes.append(other_note.strip())
 
-                    st.metric(
-                        "未稅報價",
-                        f"{currency} "
-                        f"{money(quote_total)}"
-                    )
-
-
-                with c4:
-
-                    st.metric(
-                        "含稅總額",
-                        f"{currency} "
-                        f"{money(grand_total)}"
-                    )
-
-
-                st.info(
-
-                    f"📌 毛利率："
-                    f"{gross_margin:.2f}%"
-                    f"　|　單價："
-                    f"{currency} "
-                    f"{money(quote_unit_price)}"
-                    f" / {unit}"
-
-                )
-
-
-                # =================================================
-                # 交期
-                # =================================================
-
-                lead_time = st.text_input(
-                    "⏱️ 交期",
-                    placeholder="例如：確認訂單後 30 天"
-                )
-
-
-                validity = st.text_input(
-                    "📅 報價有效期限",
-                    value="30 days"
-                )
-
-
-                remark = st.text_area(
-                    "📝 報價備註"
-                )
-
-
-                # =================================================
-                # 儲存報價
-                # =================================================
+                # -----------------------------------------------------
+                # 生成正式報價
+                # -----------------------------------------------------
+                st.divider()
 
                 if st.button(
-
-                    "💾 儲存報價草稿",
-
+                    "🚀 生成正式報價單",
                     type="primary",
-
-                    use_container_width=True
-
+                    use_container_width=True,
+                    key="generate_simple_quote",
                 ):
+                    valid_items = edited_items[
+                        edited_items["品名"].fillna("").astype(str).str.strip() != ""
+                    ].copy()
 
-                    quote_id = (
-
-                        "QT-"
-                        f"{datetime.now().strftime('%Y%m%d')}-"
-                        f"{str(uuid.uuid4())[:6].upper()}"
-
-                    )
-
-
-                    quote_data = {
-
-                        "quote_id":
-                            quote_id,
-
-                        "RFQ_ID":
-                            rfq["RFQ_ID"],
-
-                        "quote_version":
-                            quote_version,
-
-                        "quote_date":
-                            quote_date.strftime(
-                                "%Y-%m-%d"
-                            ),
-
-                        "customer":
-                            rfq.get(
-                                "customer",
-                                ""
-                            ),
-
-                        "product":
-                            rfq.get(
-                                "title",
-                                ""
-                            ),
-
-                        "drawing_version":
-                            (
-                                drawing_version.strip()
-                                if drawing_version.strip()
-                                else "待確認"
-                            ),
-
-                        "quantity":
-                            quantity,
-
-                        "currency":
-                            currency,
-
-                        "unit":
-                            unit,
-
-                        "material_cost":
-                            material_cost,
-
-                        "processing_cost":
-                            processing_cost,
-
-                        "outsourcing_cost":
-                            outsourcing_cost,
-
-                        "surface_cost":
-                            surface_cost,
-
-                        "packing_cost":
-                            packing_cost,
-
-                        "transport_cost":
-                            transport_cost,
-
-                        "other_cost":
-                            other_cost,
-
-                        "total_cost":
-                            total_cost,
-
-                        "management_rate":
-                            management_rate,
-
-                        "management_cost":
-                            management_cost,
-
-                        "profit_rate":
-                            profit_rate,
-
-                        "profit_amount":
-                            profit_amount,
-
-                        "discount":
-                            discount,
-
-                        "quote_unit_price":
-                            quote_unit_price,
-
-                        "quote_total":
-                            quote_total,
-
-                        "tax_rate":
-                            tax_rate,
-
-                        "tax_amount":
-                            tax_amount,
-
-                        "grand_total":
-                            grand_total,
-
-                        "payment_terms":
-                            payment_terms,
-
-                        "incoterms":
-                            incoterms,
-
-                        "delivery":
-                            (
-                                delivery.strip()
-                                if delivery.strip()
-                                else "待確認"
-                            ),
-
-                        "lead_time":
-                            (
-                                lead_time.strip()
-                                if lead_time.strip()
-                                else "待確認"
-                            ),
-
-                        "validity":
-                            validity,
-
-                        "remark":
-                            remark,
-
-                        "approved":
-                            False,
-
-                        "approved_time":
-                            "",
-
-                        "sent":
-                            False,
-
-                        "sent_time":
-                            "",
-
-                        "created_time":
-                            datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            )
-
-                    }
-
-
-                    try:
-
-                        quote_df = conn.read(
-
-                            worksheet="Quotes",
-
-                            ttl=0
-
-                        )
-
-                    except Exception:
-
-                        quote_df = pd.DataFrame()
-
-
-                    if quote_df is None:
-
-                        quote_df = pd.DataFrame()
-
-
-                    if quote_df.empty:
-
-                        quote_df = pd.DataFrame(
-                            columns=QUOTE_COLUMNS
-                        )
-
+                    if valid_items.empty:
+                        st.error("❌ 請至少輸入一個報價品項。")
+                    elif (valid_items["數量"] <= 0).any():
+                        st.error("❌ 報價品項數量必須大於 0。")
                     else:
+                        quote_id = (
+                            "Q-"
+                            + datetime.now().strftime("%Y%m%d")
+                            + str(uuid.uuid4())[:2].upper()
+                        )
+
+                        generated_quote = {
+                            "quote_id": quote_id,
+                            "RFQ_ID": selected_rfq,
+                            "quote_version": "V1",
+                            "quote_date": quote_date.strftime("%Y/%m/%d"),
+                            "customer": rfq_customer,
+                            "contact_person": contact_person.strip() or "待確認",
+                            "currency": currency,
+                            "validity": validity,
+                            "payment_terms": payment_terms,
+                            "incoterms": trade_terms,
+                            "lead_time": lead_time,
+                            "specification": specification.strip(),
+                            "notes": notes,
+                            "items": valid_items.to_dict("records"),
+                            "quote_total": subtotal,
+                            "tax_rate": tax_rate,
+                            "tax_amount": tax_amount,
+                            "grand_total": grand_total,
+                            "created_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+
+                        st.session_state.generated_quote = generated_quote
+
+                        # Quotes 主表保留一筆報價摘要，明細以文字保存，避免破壞既有 Quotes 結構
+                        quote_row = {
+                            "quote_id": quote_id,
+                            "RFQ_ID": selected_rfq,
+                            "quote_version": "V1",
+                            "quote_date": quote_date.strftime("%Y-%m-%d"),
+                            "customer": rfq_customer,
+                            "product": " / ".join(valid_items["品名"].astype(str).tolist()),
+                            "drawing_version": "待確認",
+                            "quantity": float(valid_items["數量"].sum()),
+                            "currency": currency,
+                            "unit": "多品項" if len(valid_items) > 1 else str(valid_items.iloc[0]["單位"]),
+                            "material_cost": 0.0,
+                            "processing_cost": 0.0,
+                            "outsourcing_cost": 0.0,
+                            "surface_cost": 0.0,
+                            "packing_cost": 0.0,
+                            "transport_cost": 0.0,
+                            "other_cost": 0.0,
+                            "total_cost": 0.0,
+                            "management_rate": 0.0,
+                            "management_cost": 0.0,
+                            "profit_rate": 0.0,
+                            "profit_amount": 0.0,
+                            "discount": 0.0,
+                            "quote_unit_price": 0.0,
+                            "quote_total": subtotal,
+                            "tax_rate": tax_rate if tax_amount > 0 else 0.0,
+                            "tax_amount": tax_amount,
+                            "grand_total": grand_total,
+                            "payment_terms": payment_terms,
+                            "incoterms": trade_terms,
+                            "delivery": "待確認",
+                            "lead_time": lead_time,
+                            "validity": validity,
+                            "remark": "；".join(notes),
+                            "approved": False,
+                            "approved_time": "",
+                            "sent": False,
+                            "sent_time": "",
+                            "created_time": generated_quote["created_time"],
+                        }
+
+                        try:
+                            quote_df = conn.read(worksheet="Quotes", ttl=0)
+                        except Exception:
+                            quote_df = pd.DataFrame()
+
+                        if quote_df is None or quote_df.empty:
+                            quote_df = pd.DataFrame(columns=QUOTE_COLUMNS)
 
                         for col in QUOTE_COLUMNS:
-
                             if col not in quote_df.columns:
-
                                 quote_df[col] = ""
 
+                        quote_df = pd.concat(
+                            [quote_df, pd.DataFrame([quote_row])],
+                            ignore_index=True,
+                        )
 
-                    quote_df = pd.concat(
+                        try:
+                            conn.update(worksheet="Quotes", data=quote_df)
+                            st.success(f"✅ 正式報價單已建立：{quote_id}")
+                        except Exception as e:
+                            st.warning("⚠️ 報價單已在畫面產生，但 Quotes 工作表寫入失敗。")
+                            st.exception(e)
 
-                        [
+                # -----------------------------------------------------
+                # 正式預覽 / Excel
+                # -----------------------------------------------------
+                generated = st.session_state.generated_quote
 
-                            quote_df,
+                if generated:
+                    st.divider()
+                    st.markdown("## 📄 報價單預覽")
+                    st.markdown("### 震唯機械股份有限公司")
+                    st.caption("報 價 單 / QUOTATION")
 
-                            pd.DataFrame(
-                                [quote_data]
-                            )
+                    h1, h2 = st.columns(2)
+                    with h1:
+                        st.write(f"**客戶名稱：** {generated['customer']}")
+                        st.write(f"**Attn：** {generated['contact_person']}")
+                        st.write(f"**有效期限：** {generated['validity']}")
+                        st.write(f"**付款條件：** {generated['payment_terms']}")
+                        st.write(f"**交貨日期：** {generated['lead_time']}")
+                    with h2:
+                        st.write(f"**REF. NO.：** {generated['quote_id']}")
+                        st.write(f"**日期：** {generated['quote_date']}")
+                        st.write(f"**報價條件：** {generated['incoterms']}")
+                        st.write(f"**幣別：** {generated['currency']}")
 
-                        ],
+                    preview_items = pd.DataFrame(generated["items"])
+                    preview_items.insert(0, "NO.", range(1, len(preview_items) + 1))
+                    preview_items["單價"] = preview_items["單價"].apply(money)
+                    preview_items["金額"] = preview_items["金額"].apply(money)
 
-                        ignore_index=True
-
+                    st.dataframe(
+                        preview_items[["NO.", "品名", "規格/說明", "數量", "單位", "單價", "金額"]],
+                        use_container_width=True,
+                        hide_index=True,
                     )
 
+                    t1, t2, t3 = st.columns(3)
+                    t1.metric("未稅合計", f"{generated['currency']} {money(generated['quote_total'])}")
+                    t2.metric("營業稅", f"{generated['currency']} {money(generated['tax_amount'])}")
+                    t3.metric("總額", f"{generated['currency']} {money(generated['grand_total'])}")
 
-                    try:
+                    if generated["specification"]:
+                        st.markdown("### 產品規格")
+                        for line in generated["specification"].splitlines():
+                            if line.strip():
+                                st.write(f"• {line.strip()}")
 
-                        conn.update(
+                    if generated["notes"]:
+                        st.markdown("### 備註")
+                        for note in generated["notes"]:
+                            st.write(f"• {note}")
 
-                            worksheet="Quotes",
+                    st.markdown("**客戶確認：________________　核准：________　覆核：________　製單：________**")
 
-                            data=quote_df
-
-                        )
-
-
-                        st.success(
-
-                            f"✅ 報價草稿建立成功："
-                            f"{quote_id}"
-
-                        )
-
-
-                    except Exception as e:
-
-                        st.error(
-                            "❌ 報價寫入 Google Sheets 失敗"
-                        )
-
-                        st.exception(e)
-
-
-                # =================================================
-                # 報價摘要
-                # =================================================
-
-                st.divider()
-
-
-                st.markdown(
-                    "### 📄 報價摘要"
-                )
-
-
-                summary_df = pd.DataFrame({
-
-                    "項目": [
-
-                        "RFQ",
-                        "客戶",
-                        "產品",
-                        "數量",
-                        "幣別",
-                        "總成本",
-                        "管理費",
-                        "利潤",
-                        "折扣",
-                        "未稅報價",
-                        "稅額",
-                        "含稅總額",
-                        "單價",
-                        "交期",
-                        "有效期限"
-
-                    ],
-
-                    "內容": [
-
-                        rfq.get(
-                            "RFQ_ID",
-                            ""
-                        ),
-
-                        rfq.get(
-                            "customer",
-                            ""
-                        ),
-
-                        rfq.get(
-                            "title",
-                            ""
-                        ),
-
-                        quantity,
-
-                        currency,
-
-                        money(
-                            total_cost
-                        ),
-
-                        money(
-                            management_cost
-                        ),
-
-                        money(
-                            profit_amount
-                        ),
-
-                        money(
-                            discount
-                        ),
-
-                        money(
-                            quote_total
-                        ),
-
-                        money(
-                            tax_amount
-                        ),
-
-                        money(
-                            grand_total
-                        ),
-
-                        money(
-                            quote_unit_price
-                        ),
-
-                        lead_time
-                        if lead_time.strip()
-                        else "待確認",
-
-                        validity
-
-                    ]
-
-                })
-
-
-                st.dataframe(
-
-                    summary_df,
-
-                    use_container_width=True,
-
-                    hide_index=True
-
-                )
-
-
-                # =================================================
-                # Excel
-                # =================================================
-
-                export_df = pd.DataFrame(
-                    [quote_data]
-                ) if "quote_data" in locals() else pd.DataFrame()
-
-
-                if not export_df.empty:
-
+                    # Excel：正式客戶版，不輸出內部成本/利潤
                     excel_buffer = io.BytesIO()
-
-
                     try:
+                        from openpyxl import Workbook
+                        from openpyxl.styles import Font, Alignment, Border, Side
 
-                        with pd.ExcelWriter(
+                        wb = Workbook()
+                        ws = wb.active
+                        ws.title = "Quotation"
 
-                            excel_buffer,
+                        ws.merge_cells("A1:G1")
+                        ws["A1"] = "震唯機械股份有限公司"
+                        ws["A1"].font = Font(size=18, bold=True)
+                        ws["A1"].alignment = Alignment(horizontal="center")
 
-                            engine="openpyxl"
+                        ws.merge_cells("A2:G2")
+                        ws["A2"] = "報 價 單 / QUOTATION"
+                        ws["A2"].font = Font(size=16, bold=True)
+                        ws["A2"].alignment = Alignment(horizontal="center")
 
-                        ) as writer:
+                        ws["A4"] = "客戶名稱"
+                        ws["B4"] = generated["customer"]
+                        ws["E4"] = "REF. NO."
+                        ws["F4"] = generated["quote_id"]
+                        ws["A5"] = "Attn"
+                        ws["B5"] = generated["contact_person"]
+                        ws["E5"] = "日期"
+                        ws["F5"] = generated["quote_date"]
+                        ws["A6"] = "有效期限"
+                        ws["B6"] = generated["validity"]
+                        ws["A7"] = "付款條件"
+                        ws["B7"] = generated["payment_terms"]
+                        ws["E7"] = "報價條件"
+                        ws["F7"] = generated["incoterms"]
+                        ws["A8"] = "交貨日期"
+                        ws["B8"] = generated["lead_time"]
 
-                            export_df.to_excel(
+                        headers = ["NO.", "品名", "規格/說明", "數量", "單位", "單價", "金額"]
+                        start_row = 10
+                        for col_no, header in enumerate(headers, 1):
+                            cell = ws.cell(start_row, col_no, header)
+                            cell.font = Font(bold=True)
+                            cell.alignment = Alignment(horizontal="center")
 
-                                writer,
+                        raw_items = pd.DataFrame(generated["items"])
+                        for i, (_, item) in enumerate(raw_items.iterrows(), start=1):
+                            r = start_row + i
+                            ws.cell(r, 1, i)
+                            ws.cell(r, 2, str(item.get("品名", "")))
+                            ws.cell(r, 3, str(item.get("規格/說明", "")))
+                            ws.cell(r, 4, float(item.get("數量", 0)))
+                            ws.cell(r, 5, str(item.get("單位", "")))
+                            ws.cell(r, 6, float(item.get("單價", 0)))
+                            ws.cell(r, 7, float(item.get("金額", 0)))
+                            ws.cell(r, 6).number_format = '#,##0.00'
+                            ws.cell(r, 7).number_format = '#,##0.00'
 
-                                index=False,
+                        total_row = start_row + len(raw_items) + 1
+                        ws.cell(total_row, 6, "合計")
+                        ws.cell(total_row, 7, generated["quote_total"])
+                        ws.cell(total_row, 7).number_format = '#,##0.00'
 
-                                sheet_name="Quotation"
+                        current_row = total_row + 2
+                        if generated["specification"]:
+                            ws.cell(current_row, 1, "產品規格")
+                            ws.cell(current_row, 1).font = Font(bold=True)
+                            current_row += 1
+                            for line in generated["specification"].splitlines():
+                                if line.strip():
+                                    ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
+                                    ws.cell(current_row, 1, f"• {line.strip()}")
+                                    current_row += 1
 
-                            )
+                        current_row += 1
+                        ws.cell(current_row, 1, "備註")
+                        ws.cell(current_row, 1).font = Font(bold=True)
+                        current_row += 1
+                        for note in generated["notes"]:
+                            ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
+                            ws.cell(current_row, 1, f"• {note}")
+                            current_row += 1
 
+                        thin = Side(style="thin")
+                        for row in ws.iter_rows(min_row=start_row, max_row=total_row, min_col=1, max_col=7):
+                            for cell in row:
+                                cell.border = Border(top=thin, bottom=thin, left=thin, right=thin)
+                                cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+                        widths = {"A": 7, "B": 28, "C": 28, "D": 10, "E": 10, "F": 16, "G": 16}
+                        for col_letter, width in widths.items():
+                            ws.column_dimensions[col_letter].width = width
+
+                        wb.save(excel_buffer)
 
                         st.download_button(
-
-                            "📊 下載 Excel 報價",
-
+                            "📊 下載正式 Excel 報價單",
                             data=excel_buffer.getvalue(),
-
-                            file_name=(
-                                f"{quote_id}.xlsx"
-                            ),
-
-                            mime=(
-                                "application/vnd.openxmlformats-"
-                                "officedocument.spreadsheetml.sheet"
-                            )
-
+                            file_name=f"{generated['quote_id']}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key="download_simple_quote_excel",
                         )
-
                     except Exception as e:
-
-                        st.warning(
-                            f"Excel 產生失敗：{e}"
-                        )
+                        st.warning(f"Excel 報價單產生失敗：{e}")
 
 
 # ################################################################
