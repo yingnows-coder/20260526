@@ -2187,7 +2187,7 @@ with tab_quote:
 
 
     st.subheader("💰 RFQ 報價產生器")
-    st.caption("簡化流程：RFQ → 商務條件 → 報價品項 → 規格 → 備註 → 正式報價")
+    st.caption("正式報價流程：RFQ → 商務條件 → 報價品項 → 規格 → 備註 → 中／英文正式報價單")
 
     if "quote_items" not in st.session_state:
         st.session_state.quote_items = [
@@ -3311,6 +3311,9 @@ with tab_quote:
 # ################################################################
 
 with tab_kpi:
+    st.markdown("## 📈 Management Dashboard")
+    st.caption("從詢價、報價到成交與結案的即時管理指標，適合主管會議與成品展示。")
+
 
     def render_kpi_bubble(dataframe, x_col, y_col, size_col, label_col, title, x_title, y_title):
         """
@@ -3983,6 +3986,7 @@ with tab_kpi:
         st.info("目前沒有足夠日期資料可顯示趨勢。")
     else:
         trend_df = trend_df.astype(int).sort_index()
+        # 發表版：每月詢價與報價採並列長條圖呈現
         st.empty().bar_chart(
             trend_df,
             use_container_width=True
@@ -4917,40 +4921,44 @@ with tab_sales:
                 st.markdown("#### 產品型號績效")
                 st.dataframe(model_summary, use_container_width=True, hide_index=True)
 
-                top_models = model_summary.head(10).copy()
+                top_models = model_summary[model_summary["成交金額"] > 0].head(10).copy()
                 st.markdown("#### Top 10 型號－成交金額")
 
-                # 使用 Plotly，固定型號文字為橫式顯示
-                fig_top_models = px.bar(
-                    top_models,
-                    x="產品型號",
-                    y="成交金額",
-                    text="成交金額",
-                    labels={
-                        "產品型號": "產品型號",
-                        "成交金額": "成交金額",
-                    },
-                )
-                fig_top_models.update_xaxes(
-                    tickangle=0,
-                    automargin=True,
-                )
-                fig_top_models.update_traces(
-                    texttemplate="%{text:,.0f}",
-                    textposition="outside",
-                    cliponaxis=False,
-                )
-                fig_top_models.update_layout(
-                    xaxis_title="產品型號",
-                    yaxis_title="成交金額",
-                    showlegend=False,
-                    margin=dict(b=90, t=20),
-                )
-                st.plotly_chart(
-                    fig_top_models,
-                    use_container_width=True,
-                    key="top10_model_sales_bar",
-                )
+                if top_models.empty:
+                    st.info("目前尚無已成交金額資料；有成交紀錄後將自動顯示 Top 10 型號排行。")
+                else:
+                    # 發表版：橫式型號文字、金額標籤、由高至低
+                    top_models = top_models.sort_values("成交金額", ascending=False)
+                    fig_top_models = px.bar(
+                        top_models,
+                        x="產品型號",
+                        y="成交金額",
+                        text="成交金額",
+                        labels={
+                            "產品型號": "產品型號",
+                            "成交金額": "成交金額",
+                        },
+                    )
+                    fig_top_models.update_xaxes(
+                        tickangle=0,
+                        automargin=True,
+                    )
+                    fig_top_models.update_traces(
+                        texttemplate="%{text:,.0f}",
+                        textposition="outside",
+                        cliponaxis=False,
+                    )
+                    fig_top_models.update_layout(
+                        xaxis_title="產品型號",
+                        yaxis_title="成交金額",
+                        showlegend=False,
+                        margin=dict(b=90, t=20),
+                    )
+                    st.plotly_chart(
+                        fig_top_models,
+                        use_container_width=True,
+                        key="top10_model_sales_bar",
+                    )
 
         with owner_tab:
             owner_summary = (
@@ -5314,7 +5322,7 @@ with tab_intelligence:
             font-size:18px; font-weight:900; margin-top:6px;
         }
         </style>
-        <div class="si-title">🎯 Sales Intelligence 銷售戰情室</div>
+        <div class="si-title">🎯 Sales Intelligence｜智慧銷售戰情室</div>
         """,
         unsafe_allow_html=True
     )
