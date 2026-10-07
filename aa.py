@@ -5,6 +5,14 @@ from datetime import datetime, timedelta
 import uuid
 import io
 
+# Excel 匯出為選用功能；即使環境尚未安裝 openpyxl，主系統仍可正常執行
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+
 
 # =========================================================
 # 1. 基本設定
@@ -2360,8 +2368,10 @@ with tab_quote:
                     # Excel：正式客戶版，不輸出內部成本/利潤
                     excel_buffer = io.BytesIO()
                     try:
-                        from openpyxl import Workbook
-                        from openpyxl.styles import Font, Alignment, Border, Side
+                        if not OPENPYXL_AVAILABLE:
+                            raise ImportError(
+                                "尚未安裝 openpyxl。請在 requirements.txt 加入 openpyxl 後重新部署。"
+                            )
 
                         wb = Workbook()
                         ws = wb.active
