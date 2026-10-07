@@ -190,6 +190,29 @@ RFQ_STATUS = [
 ]
 
 
+# =========================================================
+# 產品分類 / 型號主檔
+# =========================================================
+PRODUCT_MODELS = {
+    "CNC Multi-Axis Turning Milling Center": ["JMY-4220", "JMY-6020"],
+    "CNC Double Spindle Turning Center": ["TMY-25", "TMY-42"],
+    "High Precision CNC Lathe": ["JW-42B3", "JW-42B3S", "JW-42B3M"],
+    "High Precision CNC Mult Function Lathe": ["JW-25", "JW-32", "JFKL-400"],
+    "High Precision Slant Bed CNC Lathe": [
+        "JW-16", "JW-16M", "JW-16ST", "JW-16STM",
+        "JW-21", "JW-21M", "JW21-ST", "JW-21STM"
+    ],
+    "Heavy Duty CNC Lathe": [
+        "JW-31", "JW-31M", "JW-31ST", "JW-31STM",
+        "JW-41", "JW-41M", "JW-41ST", "JW-41STM", "JW-41MLX2"
+    ],
+    "Chip Compactor": ["JCP", "JCP S"],
+    "Crush Machine": ["CCM-600", "CCM-700"],
+    "Lifting Machine": ["KLFM-200"],
+}
+PRODUCT_CATEGORIES = list(PRODUCT_MODELS.keys())
+
+
 STATUS_NEXT_STEP = {
 
     "新詢價":
@@ -694,17 +717,41 @@ with tab_rfq:
             )
 
 
+        p1, p2 = st.columns([1.6, 1])
+
+        with p1:
+            new_product_category = st.selectbox(
+                "🏷️ 產品分類",
+                ["請選擇"] + PRODUCT_CATEGORIES,
+                key="new_product_category"
+            )
+
+        with p2:
+            model_options = (
+                PRODUCT_MODELS.get(new_product_category, [])
+                if new_product_category != "請選擇"
+                else []
+            )
+            new_product_model = st.selectbox(
+                "⚙️ 產品型號",
+                ["請選擇"] + model_options,
+                key="new_product_model"
+            )
+
         c4, c5 = st.columns(
             [2, 1]
         )
 
-
         with c4:
-
-            new_title = st.text_input(
-                "📌 詢價名稱"
+            default_title = (
+                new_product_model
+                if new_product_model != "請選擇"
+                else ""
             )
-
+            new_title = st.text_input(
+                "📌 詢價名稱",
+                value=default_title
+            )
 
         with c5:
 
