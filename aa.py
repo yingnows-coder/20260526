@@ -74,7 +74,7 @@ top1, top2 = st.columns([8, 1])
 with top2:
 
     st.link_button(
-        "📊 BB頁面",
+        "📋 雲端 Trello 管理系統",
         "https://aazzyybb.streamlit.app/"
     )
 
