@@ -631,12 +631,13 @@ def save_status_log(
 # 18. 頁面 Tabs
 # =========================================================
 
-tab_rfq, tab_board, tab_quote, tab_log = st.tabs(
+tab_rfq, tab_board, tab_quote, tab_kpi, tab_log = st.tabs(
 
     [
         "📋 RFQ追蹤表",
         "📊 RFQ看板",
         "💰 報價產生器",
+        "📈 KPI儀表板",
         "📜 StatusLog"
     ]
 
@@ -2991,8 +2992,517 @@ with tab_quote:
                         st.warning(f"PDF 報價單產生失敗：{e}")
 
 
+
 # ################################################################
-# TAB 4：STATUS LOG
+# TAB 4：KPI 儀表板
+# ################################################################
+
+with tab_kpi:
+
+    st.subheader("📈 RFQ / 報價 KPI 儀表板")
+    st.caption("依 Tasks、Quotes、StatusLog 即時計算；不另外輸入 KPI 數字。")
+
+    today = pd.Timestamp(datetime.now().date())
+    month_start = today.replace(day=1)
+
+    kpi_df = df.copy()
+
+    # ---------------------------------------------------------
+    # 日期正規化
+    # ---------------------------------------------------------
+    if "created_time" not in kpi_df.columns:
+        kpi_df["created_time"] = ""
+
+    if "due_time" not in kpi_df.columns:
+        kpi_df["due_time"] = ""
+
+    if "status" not in kpi_df.columns:
+        kpi_df["status"] = ""
+
+    if "owner" not in kpi_df.columns:
+        kpi_df["owner"] = "待確認"
+
+    kpi_df["_created_dt"] = pd.to_datetime(
+        kpi_df["created_time"],
+        errors="coerce"
+    )
+
+    kpi_df["_due_dt"] = pd.to_datetime(
+        kpi_df["due_time"],
+        errors="coerce"
+    )
+
+    # ---------------------------------------------------------
+    # Quotes
+    # ---------------------------------------------------------
+    try:
+        kpi_quotes = conn.read(
+            worksheet="Quotes",
+            ttl=0
+        )
+    except Exception:
+        kpi_quotes = pd.DataFrame()
+
+    if kpi_quotes is None:
+        kpi_quotes = pd.DataFrame()
+
+    if not kpi_quotes.empty:
+        if "quote_date" not in kpi_quotes.columns:
+            kpi_quotes["quote_date"] = ""
+
+        if "quote_total" not in kpi_quotes.columns:
+            kpi_quotes["quote_total"] = 0.0
+
+        if "RFQ_ID" not in kpi_quotes.columns:
+            kpi_quotes["RFQ_ID"] = ""
+
+        kpi_quotes["_quote_dt"] = pd.to_datetime(
+            kpi_quotes["quote_date"],
+            errors="coerce"
+        )
+
+        kpi_quotes["_quote_total"] = pd.to_numeric(
+            kpi_quotes["quote_total"],
+            errors="coerce"
+        ).fillna(0.0)
+
+    # ---------------------------------------------------------
+    # StatusLog
+    # ---------------------------------------------------------
+    try:
+        kpi_log = conn.read(
+            worksheet="StatusLog",
+            ttl=0
+        )
+    except Exception:
+        kpi_log = pd.DataFrame()
+
+    if kpi_log is None:
+        kpi_log = pd.DataFrame()
+
+    if not kpi_log.empty:
+        if "change_time" not in kpi_log.columns:
+            kpi_log["change_time"] = ""
+
+        if "new_status" not in kpi_log.columns:
+            kpi_log["new_status"] = ""
+
+        if "RFQ_ID" not in kpi_log.columns:
+            kpi_log["RFQ_ID"] = ""
+
+        kpi_log["_change_dt"] = pd.to_datetime(
+            kpi_log["change_time"],
+            errors="coerce"
+        )
+
+    # ---------------------------------------------------------
+    # KPI 計算
+    # ---------------------------------------------------------
+    this_month_rfq = kpi_df[
+        kpi_df["_created_dt"].notna()
+        & (kpi_df["_created_dt"] >= month_start)
+        & (kpi_df["_created_dt"] < month_start + pd.offsets.MonthBegin(1))
+    ]
+
+    month_rfq_count = len(this_month_rfq)
+
+    # 本月已報價：優先使用 StatusLog 的實際狀態變更時間
+    if not kpi_log.empty:
+        month_quoted_log = kpi_log[
+            (kpi_log["new_status"].astype(str) == "已報價")
+            & kpi_log["_change_dt"].notna()
+            & (kpi_log["_change_dt"] >= month_start)
+            & (kpi_log["_change_dt"] < month_start + pd.offsets.MonthBegin(1))
+        ]
+
+        month_quoted_count = (
+            month_quoted_log["RFQ_ID"]
+            .astype(str)
+            .replace("", pd.NA)
+            .dropna()
+            .nunique()
+        )
+    else:
+        month_quoted_count = 0
+
+    # 如果舊資料沒有 StatusLog，使用 Quotes 當備援
+    if month_quoted_count == 0 and not kpi_quotes.empty:
+        month_quote_rows = kpi_quotes[
+            kpi_quotes["_quote_dt"].notna()
+            & (kpi_quotes["_quote_dt"] >= month_start)
+            & (kpi_quotes["_quote_dt"] < month_start + pd.offsets.MonthBegin(1))
+        ]
+        month_quoted_count = (
+            month_quote_rows["RFQ_ID"]
+            .astype(str)
+            .replace("", pd.NA)
+            .dropna()
+            .nunique()
+        )
+
+    quote_rate = (
+        month_quoted_count / month_rfq_count * 100
+        if month_rfq_count > 0
+        else 0.0
+    )
+
+    closed_count = int(
+        (kpi_df["status"].astype(str) == "結案").sum()
+    )
+
+    active_count = int(
+        (kpi_df["status"].astype(str) != "結案").sum()
+    )
+
+    overdue_mask = (
+        kpi_df["_due_dt"].notna()
+        & (kpi_df["_due_dt"].dt.normalize() < today)
+        & (kpi_df["status"].astype(str) != "結案")
+    )
+    overdue_count = int(overdue_mask.sum())
+
+    pending_info_count = int(
+        (kpi_df["status"].astype(str) == "待補件").sum()
+    )
+
+    pending_quote_count = int(
+        (kpi_df["status"].astype(str) == "待核價").sum()
+    )
+
+    if not kpi_quotes.empty:
+        quote_total_sum = float(
+            kpi_quotes["_quote_total"].sum()
+        )
+
+        valid_quote_amounts = kpi_quotes[
+            kpi_quotes["_quote_total"] > 0
+        ]
+
+        avg_quote_amount = (
+            float(valid_quote_amounts["_quote_total"].mean())
+            if not valid_quote_amounts.empty
+            else 0.0
+        )
+    else:
+        quote_total_sum = 0.0
+        avg_quote_amount = 0.0
+
+    # ---------------------------------------------------------
+    # 平均報價時間：RFQ created_time → 首次進入已報價
+    # ---------------------------------------------------------
+    avg_quote_days = None
+
+    if not kpi_log.empty and not kpi_df.empty:
+        quoted_logs = kpi_log[
+            (kpi_log["new_status"].astype(str) == "已報價")
+            & kpi_log["_change_dt"].notna()
+        ].copy()
+
+        if not quoted_logs.empty:
+            first_quote = (
+                quoted_logs
+                .sort_values("_change_dt")
+                .groupby("RFQ_ID", as_index=False)
+                .first()[["RFQ_ID", "_change_dt"]]
+            )
+
+            created_map = kpi_df[
+                ["RFQ_ID", "_created_dt"]
+            ].copy()
+
+            quote_cycle = first_quote.merge(
+                created_map,
+                on="RFQ_ID",
+                how="inner"
+            )
+
+            quote_cycle["days"] = (
+                quote_cycle["_change_dt"]
+                - quote_cycle["_created_dt"]
+            ).dt.total_seconds() / 86400
+
+            quote_cycle = quote_cycle[
+                quote_cycle["days"].notna()
+                & (quote_cycle["days"] >= 0)
+            ]
+
+            if not quote_cycle.empty:
+                avg_quote_days = float(
+                    quote_cycle["days"].mean()
+                )
+
+    # ---------------------------------------------------------
+    # KPI Cards
+    # ---------------------------------------------------------
+    st.markdown("### 本月 KPI")
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+
+    k1.metric(
+        "本月新增 RFQ",
+        f"{month_rfq_count} 件"
+    )
+
+    k2.metric(
+        "本月已報價",
+        f"{month_quoted_count} 件"
+    )
+
+    k3.metric(
+        "本月報價率",
+        f"{quote_rate:.1f}%"
+    )
+
+    k4.metric(
+        "進行中案件",
+        f"{active_count} 件"
+    )
+
+    k5.metric(
+        "逾期案件",
+        f"{overdue_count} 件"
+    )
+
+    st.markdown("### 管理 KPI")
+
+    k6, k7, k8, k9, k10 = st.columns(5)
+
+    k6.metric(
+        "待補件",
+        f"{pending_info_count} 件"
+    )
+
+    k7.metric(
+        "待核價",
+        f"{pending_quote_count} 件"
+    )
+
+    k8.metric(
+        "結案",
+        f"{closed_count} 件"
+    )
+
+    k9.metric(
+        "報價總額",
+        f"{money(quote_total_sum)}"
+    )
+
+    k10.metric(
+        "平均報價額",
+        f"{money(avg_quote_amount)}"
+    )
+
+    if avg_quote_days is None:
+        st.info(
+            "平均報價時間：目前沒有足夠的「RFQ 建立 → 已報價」StatusLog 資料。"
+        )
+    else:
+        st.metric(
+            "⏱️ 平均報價時間",
+            f"{avg_quote_days:.1f} 天"
+        )
+
+    st.divider()
+
+    # ---------------------------------------------------------
+    # 狀態分布
+    # ---------------------------------------------------------
+    st.markdown("### 📊 RFQ 狀態分布")
+
+    status_summary = (
+        kpi_df["status"]
+        .fillna("待確認")
+        .astype(str)
+        .value_counts()
+        .reindex(RFQ_STATUS, fill_value=0)
+        .rename_axis("狀態")
+        .reset_index(name="案件數")
+    )
+
+    st.bar_chart(
+        status_summary.set_index("狀態")["案件數"],
+        use_container_width=True
+    )
+
+    # ---------------------------------------------------------
+    # 每月 RFQ / 報價趨勢
+    # ---------------------------------------------------------
+    st.markdown("### 📅 每月詢價 / 報價趨勢")
+
+    rfq_monthly = (
+        kpi_df[
+            kpi_df["_created_dt"].notna()
+        ]
+        .assign(
+            月份=lambda x:
+                x["_created_dt"].dt.to_period("M").astype(str)
+        )
+        .groupby("月份")
+        .size()
+        .rename("RFQ")
+    )
+
+    if not kpi_quotes.empty:
+        quote_monthly = (
+            kpi_quotes[
+                kpi_quotes["_quote_dt"].notna()
+            ]
+            .assign(
+                月份=lambda x:
+                    x["_quote_dt"].dt.to_period("M").astype(str)
+            )
+            .groupby("月份")
+            .size()
+            .rename("報價")
+        )
+    else:
+        quote_monthly = pd.Series(
+            dtype="int64",
+            name="報價"
+        )
+
+    trend_df = pd.concat(
+        [rfq_monthly, quote_monthly],
+        axis=1
+    ).fillna(0)
+
+    if trend_df.empty:
+        st.info("目前沒有足夠日期資料可顯示趨勢。")
+    else:
+        trend_df = trend_df.astype(int).sort_index()
+        st.line_chart(
+            trend_df,
+            use_container_width=True
+        )
+        st.dataframe(
+            trend_df.reset_index(),
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # ---------------------------------------------------------
+    # 負責人 KPI
+    # ---------------------------------------------------------
+    st.markdown("### 👤 負責人 KPI")
+
+    owner_base = kpi_df.copy()
+
+    owner_base["owner"] = (
+        owner_base["owner"]
+        .fillna("待確認")
+        .astype(str)
+        .replace("", "待確認")
+    )
+
+    owner_total = (
+        owner_base
+        .groupby("owner")
+        .size()
+        .rename("總案件")
+    )
+
+    owner_active = (
+        owner_base[
+            owner_base["status"].astype(str) != "結案"
+        ]
+        .groupby("owner")
+        .size()
+        .rename("進行中")
+    )
+
+    owner_closed = (
+        owner_base[
+            owner_base["status"].astype(str) == "結案"
+        ]
+        .groupby("owner")
+        .size()
+        .rename("結案")
+    )
+
+    owner_overdue = (
+        owner_base[
+            overdue_mask
+        ]
+        .groupby("owner")
+        .size()
+        .rename("逾期")
+    )
+
+    owner_kpi = pd.concat(
+        [
+            owner_total,
+            owner_active,
+            owner_closed,
+            owner_overdue
+        ],
+        axis=1
+    ).fillna(0).astype(int)
+
+    owner_kpi["結案率"] = (
+        owner_kpi["結案"]
+        / owner_kpi["總案件"]
+        * 100
+    ).round(1)
+
+    owner_kpi = (
+        owner_kpi
+        .reset_index()
+        .rename(columns={"owner": "負責人"})
+        .sort_values(
+            ["總案件", "結案"],
+            ascending=[False, False]
+        )
+    )
+
+    st.dataframe(
+        owner_kpi,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "結案率": st.column_config.NumberColumn(
+                "結案率 (%)",
+                format="%.1f%%"
+            )
+        }
+    )
+
+    # ---------------------------------------------------------
+    # 逾期案件明細
+    # ---------------------------------------------------------
+    st.markdown("### ⚠️ 逾期案件")
+
+    overdue_df = kpi_df[
+        overdue_mask
+    ].copy()
+
+    if overdue_df.empty:
+        st.success("目前沒有逾期案件。")
+    else:
+        overdue_columns = [
+            "RFQ_ID",
+            "customer",
+            "title",
+            "status",
+            "owner",
+            "due_time",
+            "next_step"
+        ]
+
+        overdue_columns = [
+            col
+            for col in overdue_columns
+            if col in overdue_df.columns
+        ]
+
+        st.dataframe(
+            overdue_df[overdue_columns],
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+# ################################################################
+# TAB 5：STATUS LOG
 # ################################################################
 
 with tab_log:
