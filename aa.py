@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime, timedelta
@@ -3191,34 +3192,228 @@ with tab_quote:
 with tab_kpi:
 
     def render_kpi_bubble(dataframe, x_col, y_col, size_col, label_col, title, x_title, y_title):
+        """
+        力學氣泡圖：
+        - 氣泡面積代表 size_col
+        - 氣泡彼此碰撞、不重疊
+        - 中心引力讓群組自然聚合
+        - 可拖曳氣泡，放開後重新進入力學模擬
+        """
         if dataframe is None or dataframe.empty:
+            st.info(f"{title}：目前沒有可分析資料。")
             return
+
         plot_df = dataframe.copy()
         for col in [x_col, y_col, size_col]:
             plot_df[col] = pd.to_numeric(plot_df[col], errors="coerce").fillna(0)
-        raw_size = plot_df[size_col].clip(lower=0)
-        bubble_size = 18 + (raw_size / raw_size.max()) * 62 if raw_size.max() > 0 else [28] * len(plot_df)
-        fig = go.Figure(data=[go.Scatter(
-            x=plot_df[x_col],
-            y=plot_df[y_col],
-            mode="markers+text",
-            text=plot_df[label_col].astype(str),
-            textposition="top center",
-            customdata=plot_df[[label_col, size_col]].values,
-            marker=dict(size=bubble_size, sizemode="diameter", opacity=0.72, line=dict(width=1)),
-            hovertemplate=(
-                f"{label_col}: %{{customdata[0]}}<br>"
-                f"{x_title}: %{{x}}<br>"
-                f"{y_title}: %{{y}}<br>"
-                f"{size_col}: %{{customdata[1]}}<extra></extra>"
-            ),
-        )])
-        fig.update_layout(
-            title=title, xaxis_title=x_title, yaxis_title=y_title,
-            height=480, margin=dict(l=20, r=20, t=60, b=20)
-        )
-        st.plotly_chart(fig, use_container_width=True)
 
+        # 限制節點數，避免瀏覽器負擔過重；KPI 通常遠低於此數量。
+        plot_df = plot_df.head(80).copy()
+        max_size = float(plot_df[size_col].clip(lower=0).max())
+        min_size = float(plot_df[size_col].clip(lower=0).min())
+
+        nodes = []
+        for _, row in plot_df.iterrows():
+            raw = max(float(row[size_col]), 0.0)
+            if max_size > min_size:
+                radius = 24 + ((raw - min_size) / (max_size - min_size)) ** 0.5 * 42
+            else:
+                radius = 38
+
+            nodes.append({
+                "label": str(row[label_col]),
+                "xValue": float(row[x_col]),
+                "yValue": float(row[y_col]),
+                "sizeValue": raw,
+                "radius": round(radius, 2),
+            })
+
+        import json
+        node_json = json.dumps(nodes, ensure_ascii=False)
+        title_json = json.dumps(title, ensure_ascii=False)
+        x_title_json = json.dumps(x_title, ensure_ascii=False)
+        y_title_json = json.dumps(y_title, ensure_ascii=False)
+        size_title_json = json.dumps(size_col, ensure_ascii=False)
+
+        html = f"""
+        <div id="force-bubble-root" style="
+            width:100%; font-family:Arial,'Microsoft JhengHei',sans-serif;
+            color:#222; box-sizing:border-box;">
+          <div style="font-size:20px;font-weight:700;margin:4px 0 2px 0;">{title}</div>
+          <div style="font-size:12px;color:#666;margin-bottom:8px;">
+            氣泡大小＝{size_col}｜可用滑鼠拖曳氣泡，放開後會依力學重新排列
+          </div>
+          <canvas id="forceCanvas" style="
+              width:100%;height:500px;border:1px solid #ddd;border-radius:10px;
+              background:transparent;touch-action:none;"></canvas>
+          <div id="bubbleTip" style="
+              display:none;position:absolute;pointer-events:none;
+              background:rgba(30,30,30,.92);color:white;padding:8px 10px;
+              border-radius:6px;font-size:12px;z-index:10;"></div>
+        </div>
+
+        <script>
+        (() => {{
+          const root = document.getElementById("force-bubble-root");
+          const canvas = document.getElementById("forceCanvas");
+          const tip = document.getElementById("bubbleTip");
+          const ctx = canvas.getContext("2d");
+          const data = {node_json};
+          const xTitle = {x_title_json};
+          const yTitle = {y_title_json};
+          const sizeTitle = {size_title_json};
+
+          let W = 900, H = 500, dpr = Math.max(1, window.devicePixelRatio || 1);
+          let dragged = null;
+          let pointerX = 0, pointerY = 0;
+
+          function resize() {{
+            W = Math.max(320, canvas.clientWidth);
+            H = 500;
+            canvas.width = W * dpr;
+            canvas.height = H * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          }}
+          resize();
+
+          const cx = () => W / 2;
+          const cy = () => H / 2;
+
+          const nodes = data.map((d, i) => {{
+            const angle = i * 2.399963;
+            const rr = Math.min(W,H) * 0.18 * Math.sqrt((i+1)/Math.max(data.length,1));
+            return {{
+              ...d,
+              x: cx() + Math.cos(angle)*rr,
+              y: cy() + Math.sin(angle)*rr,
+              vx: 0, vy: 0,
+              hue: (i * 47) % 360
+            }};
+          }});
+
+          function physics() {{
+            // Center attraction + damping
+            for (const n of nodes) {{
+              if (n === dragged) continue;
+              n.vx += (cx() - n.x) * 0.0009;
+              n.vy += (cy() - n.y) * 0.0009;
+              n.vx *= 0.94;
+              n.vy *= 0.94;
+            }}
+
+            // Collision / repulsion
+            for (let i=0; i<nodes.length; i++) {{
+              for (let j=i+1; j<nodes.length; j++) {{
+                const a=nodes[i], b=nodes[j];
+                let dx=b.x-a.x, dy=b.y-a.y;
+                let dist=Math.sqrt(dx*dx+dy*dy) || 0.01;
+                const minDist=a.radius+b.radius+5;
+                if (dist < minDist) {{
+                  const overlap=(minDist-dist)/dist*0.055;
+                  const fx=dx*overlap, fy=dy*overlap;
+                  if (a !== dragged) {{ a.vx-=fx; a.vy-=fy; }}
+                  if (b !== dragged) {{ b.vx+=fx; b.vy+=fy; }}
+                }}
+              }}
+            }}
+
+            for (const n of nodes) {{
+              if (n === dragged) {{
+                n.x = pointerX; n.y = pointerY;
+                n.vx = 0; n.vy = 0;
+              }} else {{
+                n.x += n.vx; n.y += n.vy;
+              }}
+              n.x = Math.max(n.radius+4, Math.min(W-n.radius-4, n.x));
+              n.y = Math.max(n.radius+4, Math.min(H-n.radius-4, n.y));
+            }}
+          }}
+
+          function draw() {{
+            ctx.clearRect(0,0,W,H);
+            for (const n of nodes) {{
+              ctx.beginPath();
+              ctx.arc(n.x,n.y,n.radius,0,Math.PI*2);
+              ctx.fillStyle=`hsla(${{n.hue}},62%,55%,0.72)`;
+              ctx.fill();
+              ctx.strokeStyle=`hsla(${{n.hue}},65%,35%,0.9)`;
+              ctx.lineWidth=1.2;
+              ctx.stroke();
+
+              ctx.fillStyle="#111";
+              ctx.textAlign="center";
+              ctx.textBaseline="middle";
+              ctx.font=`600 ${{Math.max(10, Math.min(14,n.radius/3.2))}}px Arial`;
+              const label = n.label.length > 12 ? n.label.slice(0,11)+"…" : n.label;
+              ctx.fillText(label,n.x,n.y-5);
+              ctx.font="11px Arial";
+              ctx.fillText(String(n.sizeValue),n.x,n.y+12);
+            }}
+          }}
+
+          function loop() {{
+            physics();
+            draw();
+            requestAnimationFrame(loop);
+          }}
+
+          function point(evt) {{
+            const r=canvas.getBoundingClientRect();
+            return {{
+              x:(evt.clientX-r.left)*(W/r.width),
+              y:(evt.clientY-r.top)*(H/r.height)
+            }};
+          }}
+
+          function hit(x,y) {{
+            for (let i=nodes.length-1;i>=0;i--) {{
+              const n=nodes[i], dx=x-n.x, dy=y-n.y;
+              if (dx*dx+dy*dy <= n.radius*n.radius) return n;
+            }}
+            return null;
+          }}
+
+          canvas.addEventListener("pointerdown", e => {{
+            const p=point(e); pointerX=p.x; pointerY=p.y;
+            dragged=hit(p.x,p.y);
+            if (dragged) canvas.setPointerCapture(e.pointerId);
+          }});
+          canvas.addEventListener("pointermove", e => {{
+            const p=point(e); pointerX=p.x; pointerY=p.y;
+            if (dragged) return;
+            const n=hit(p.x,p.y);
+            if (n) {{
+              const rr=root.getBoundingClientRect();
+              tip.style.display="block";
+              tip.style.left=(e.clientX-rr.left+12)+"px";
+              tip.style.top=(e.clientY-rr.top+12)+"px";
+              tip.innerHTML =
+                "<b>"+n.label+"</b><br>"+
+                xTitle+"："+n.xValue+"<br>"+
+                yTitle+"："+n.yValue+"<br>"+
+                sizeTitle+"："+n.sizeValue;
+              canvas.style.cursor="grab";
+            }} else {{
+              tip.style.display="none";
+              canvas.style.cursor="default";
+            }}
+          }});
+          canvas.addEventListener("pointerup", e => {{
+            dragged=null;
+            try {{ canvas.releasePointerCapture(e.pointerId); }} catch(err) {{}}
+          }});
+          canvas.addEventListener("pointerleave", () => {{
+            if (!dragged) tip.style.display="none";
+          }});
+
+          if (window.ResizeObserver) {{
+            new ResizeObserver(() => resize()).observe(canvas);
+          }}
+          loop();
+        }})();
+        </script>
+        """
+        components.html(html, height=570, scrolling=False)
 
     st.subheader("📈 RFQ / 報價 KPI 儀表板")
     st.caption("依 Tasks、Quotes、StatusLog 即時計算；不另外輸入 KPI 數字。")
