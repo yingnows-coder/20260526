@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import uuid
 import io
 import os
+import plotly.graph_objects as go
 
 # Excel 匯出為選用功能；即使環境尚未安裝 openpyxl，主系統仍可正常執行
 try:
@@ -3189,6 +3190,36 @@ with tab_quote:
 
 with tab_kpi:
 
+    def render_kpi_bubble(dataframe, x_col, y_col, size_col, label_col, title, x_title, y_title):
+        if dataframe is None or dataframe.empty:
+            return
+        plot_df = dataframe.copy()
+        for col in [x_col, y_col, size_col]:
+            plot_df[col] = pd.to_numeric(plot_df[col], errors="coerce").fillna(0)
+        raw_size = plot_df[size_col].clip(lower=0)
+        bubble_size = 18 + (raw_size / raw_size.max()) * 62 if raw_size.max() > 0 else [28] * len(plot_df)
+        fig = go.Figure(data=[go.Scatter(
+            x=plot_df[x_col],
+            y=plot_df[y_col],
+            mode="markers+text",
+            text=plot_df[label_col].astype(str),
+            textposition="top center",
+            customdata=plot_df[[label_col, size_col]].values,
+            marker=dict(size=bubble_size, sizemode="diameter", opacity=0.72, line=dict(width=1)),
+            hovertemplate=(
+                f"{label_col}: %{{customdata[0]}}<br>"
+                f"{x_title}: %{{x}}<br>"
+                f"{y_title}: %{{y}}<br>"
+                f"{size_col}: %{{customdata[1]}}<extra></extra>"
+            ),
+        )])
+        fig.update_layout(
+            title=title, xaxis_title=x_title, yaxis_title=y_title,
+            height=480, margin=dict(l=20, r=20, t=60, b=20)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
     st.subheader("📈 RFQ / 報價 KPI 儀表板")
     st.caption("依 Tasks、Quotes、StatusLog 即時計算；不另外輸入 KPI 數字。")
 
@@ -3509,7 +3540,7 @@ with tab_kpi:
         .reset_index(name="案件數")
     )
 
-    st.bar_chart(
+    st.empty().bar_chart(
         status_summary.set_index("狀態")["案件數"],
         use_container_width=True
     )
@@ -3560,7 +3591,7 @@ with tab_kpi:
         st.info("目前沒有足夠日期資料可顯示趨勢。")
     else:
         trend_df = trend_df.astype(int).sort_index()
-        st.line_chart(
+        st.empty().line_chart(
             trend_df,
             use_container_width=True
         )
@@ -3695,6 +3726,58 @@ with tab_kpi:
 # ################################################################
 # TAB 5：RFQ 甘特圖
 # ################################################################
+
+
+    st.divider()
+    st.markdown("### 🫧 KPI 氣泡分析")
+
+    # RFQ status bubble: X = workflow stage, Y = share, size = case count
+    if not df.empty and "status" in df.columns:
+        status_bubble = (
+            df["status"].fillna("未分類").astype(str)
+            .value_counts().rename_axis("狀態").reset_index(name="案件數")
+        )
+        status_order = {s: i + 1 for i, s in enumerate(RFQ_STATUS)}
+        status_bubble["流程階段"] = status_bubble["狀態"].map(status_order).fillna(0)
+        status_bubble["案件占比 (%)"] = (
+            status_bubble["案件數"] / status_bubble["案件數"].sum() * 100
+        ).round(1)
+        render_kpi_bubble(
+            status_bubble, "流程階段", "案件占比 (%)", "案件數", "狀態",
+            "RFQ 狀態分布氣泡圖", "流程階段", "案件占比 (%)"
+        )
+
+    # Monthly RFQ bubble: X = month order, Y = RFQ count, size = RFQ count
+    if not df.empty and "created_time" in df.columns:
+        mb = df.copy()
+        mb["_dt"] = pd.to_datetime(mb["created_time"], errors="coerce")
+        mb = mb[mb["_dt"].notna()]
+        if not mb.empty:
+            mb["月份"] = mb["_dt"].dt.to_period("M").astype(str)
+            mb = mb.groupby("月份").size().reset_index(name="RFQ件數").sort_values("月份")
+            mb["月份序號"] = range(1, len(mb) + 1)
+            render_kpi_bubble(
+                mb, "月份序號", "RFQ件數", "RFQ件數", "月份",
+                "每月 RFQ 趨勢氣泡圖", "月份", "RFQ 件數"
+            )
+
+    # Owner bubble built directly from Tasks, independent of prior KPI variable names.
+    if not df.empty and "owner" in df.columns:
+        ob = df.copy()
+        ob["owner"] = ob["owner"].fillna("待確認").astype(str).replace("", "待確認")
+        ob["_closed"] = ob["status"].astype(str).eq("結案")
+        owner_bubble = (
+            ob.groupby("owner")
+            .agg(總案件=("RFQ_ID", "size"), 結案件數=("_closed", "sum"))
+            .reset_index()
+        )
+        owner_bubble["結案率 (%)"] = (
+            owner_bubble["結案件數"] / owner_bubble["總案件"].replace(0, pd.NA) * 100
+        ).fillna(0).round(1)
+        render_kpi_bubble(
+            owner_bubble, "總案件", "結案率 (%)", "結案件數", "owner",
+            "業務案件量 × 結案率氣泡圖", "總案件數", "結案率 (%)"
+        )
 
 with tab_gantt:
 
