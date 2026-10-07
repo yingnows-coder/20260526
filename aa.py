@@ -2207,6 +2207,27 @@ with tab_quote:
     ]
     UNIT_OPTIONS = ["台", "組", "套", "件", "PCS", "SET"]
 
+    def translate_payment_term_en(value):
+        """Convert the app's standard Chinese payment terms to formal English."""
+        raw = "" if value is None else str(value).strip()
+        compact = raw.replace(" ", "").replace("％", "%").replace("，", ",")
+        mapping = {
+            "訂金30%現金,餘款70%出貨前付清": "30% cash deposit, 70% balance before shipment",
+            "訂金50%,餘款50%出貨前付清": "50% deposit, 50% balance before shipment",
+            "訂金30%,出貨前付清70%": "30% deposit, 70% balance before shipment",
+            "訂金50%,出貨前付清50%": "50% deposit, 50% balance before shipment",
+            "訂金30%,交機前付清70%": "30% deposit, 70% balance before delivery",
+            "訂金50%,交機前付清50%": "50% deposit, 50% balance before delivery",
+            "月結30天": "Net 30 days",
+            "月結60天": "Net 60 days",
+            "現金": "Cash",
+            "貨到付款": "Payment upon delivery",
+            "出貨前付清": "Full payment before shipment",
+            "交機前付清": "Full payment before delivery",
+            "待確認": "To be confirmed",
+        }
+        return mapping.get(compact, raw)
+
     PRODUCT_SPECS = {
         "不顯示規格": [],
         "JCP 90 鐵屑擠壓機": [
@@ -2297,25 +2318,18 @@ with tab_quote:
                         )
 
                     payment_choice = st.selectbox(
-                        "付款條件",
+                        "Payment Terms" if quote_is_en else "付款條件",
                         PAYMENT_OPTIONS,
                         key="simple_payment_choice",
-                format_func=lambda x: {
-                    "訂金30%，出貨前付清70%": "30% deposit, 70% balance before shipment",
-                    "訂金50%，出貨前付清50%": "50% deposit, 50% balance before shipment",
-                    "月結30天": "Net 30 days",
-                    "月結60天": "Net 60 days",
-                    "現金": "Cash",
-                    "貨到付款": "Payment upon delivery",
-                    "出貨前付清": "Full payment before shipment",
-                    "交機前付清": "Full payment before delivery",
-                    "自訂": "Custom",
-                }.get(x, x) if quote_is_en else x
-            )
+                        format_func=lambda x: (
+                            "Custom" if x == "自訂"
+                            else translate_payment_term_en(x)
+                        ) if quote_is_en else x,
+                    )
                     payment_custom = ""
                     if payment_choice == "自訂":
                         payment_custom = st.text_input(
-                            "自訂付款條件",
+                            "Custom Payment Terms" if quote_is_en else "自訂付款條件",
                             key="simple_payment_custom",
                         )
 
@@ -2365,32 +2379,7 @@ with tab_quote:
                         "90天": "90 days",
                         "待確認": "To be confirmed",
                     }
-                    payment_map_en = {
-                        "訂金30%，出貨前付清70%": "30% deposit, 70% balance before shipment",
-                        "訂金 30%，出貨前付清 70%": "30% deposit, 70% balance before shipment",
-                        "訂金50%，出貨前付清50%": "50% deposit, 50% balance before shipment",
-                        "訂金 50%，出貨前付清 50%": "50% deposit, 50% balance before shipment",
-                        "訂金30%，交機前付清70%": "30% deposit, 70% balance before delivery",
-                        "訂金 30%，交機前付清 70%": "30% deposit, 70% balance before delivery",
-                        "訂金50%，交機前付清50%": "50% deposit, 50% balance before delivery",
-                        "訂金 50%，交機前付清 50%": "50% deposit, 50% balance before delivery",
-                        "月結30天": "Net 30 days",
-                        "月結 30 天": "Net 30 days",
-                        "月結60天": "Net 60 days",
-                        "月結 60 天": "Net 60 days",
-                        "現金": "Cash",
-                        "貨到付款": "Payment upon delivery",
-                        "出貨前付清": "Full payment before shipment",
-                        "交機前付清": "Full payment before delivery",
-                        "待確認": "To be confirmed",
-                    }
-                    validity = validity_map_en.get(validity, validity)
-                    payment_key = str(payment_terms).strip()
-                    payment_key_compact = payment_key.replace(" ", "")
-                    payment_terms = payment_map_en.get(
-                        payment_key,
-                        payment_map_en.get(payment_key_compact, payment_key)
-                    )
+                    payment_terms = translate_payment_term_en(payment_terms)
                     trade_terms = "To be confirmed" if trade_terms == "待確認" else trade_terms
 
                 # -----------------------------------------------------
@@ -2655,8 +2644,15 @@ with tab_quote:
                 generated = st.session_state.generated_quote
 
                 if generated:
-                    generated_language = generated.get("quote_language", "中文版")
+                    generated_language = generated.get("quote_language", quote_language)
                     generated_is_en = generated_language == "English Version"
+
+                    # Output-time normalization: old session-state quotes may still contain
+                    # Chinese payment terms. Force English before Preview / Excel / PDF.
+                    if generated_is_en:
+                        generated["payment_terms"] = translate_payment_term_en(
+                            generated.get("payment_terms", "")
+                        )
 
                     st.divider()
                     st.markdown("## 📄 " + ("Quotation Preview" if generated_is_en else "報價單預覽"))
