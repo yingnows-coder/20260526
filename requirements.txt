@@ -4,3 +4,4 @@ st-gsheets-connection
 openpyxl
 Pillow
 reportlab
+plotly
