@@ -5247,8 +5247,20 @@ with tab_intelligence:
         owner_opts = sorted([x for x in intel["owner"].dropna().astype(str).unique() if x.strip()])
         intel_owners = st.multiselect("業務", owner_opts, default=owner_opts, key="si_owner")
     with f4:
-        country_opts = sorted([x for x in intel["country"].unique() if x != "未分類"])
-        intel_countries = st.multiselect("國家", country_opts, default=country_opts, key="si_country")
+        # 國家篩選：改為單選下拉，避免 multiselect 預設全選時難以操作
+        country_opts = sorted(
+            {
+                str(x).strip()
+                for x in intel["country"].dropna().astype(str).tolist()
+                if str(x).strip() and str(x).strip() != "未分類"
+            }
+        )
+        intel_country = st.selectbox(
+            "國家",
+            ["全部國家"] + country_opts,
+            index=0,
+            key="si_country_filter"
+        )
 
     if intel_start > intel_end:
         st.error("起始日期不可晚於結束日期。")
@@ -5259,8 +5271,11 @@ with tab_intelligence:
         view = intel[intel["_created"].between(s, e, inclusive="both")].copy()
         if intel_owners:
             view = view[view["owner"].astype(str).isin(intel_owners)]
-        if intel_countries:
-            view = view[view["country"].isin(intel_countries)]
+        if intel_country != "全部國家":
+            view = view[
+                view["country"].fillna("").astype(str).str.strip()
+                == intel_country
+            ].copy()
 
     view["_quoted"] = view["status"].astype(str).isin(["已報價", "追蹤中", "結案"])
     view["_won"] = view["sales_result"].eq("已成交")
