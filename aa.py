@@ -26,8 +26,40 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📌 企業版：RFQ 詢價追蹤管理系統")
-st.caption("RFQ Workflow + 報價產生器 | edit by 林溫城")
+# =========================================================
+# 系統標題 + JENN-WEI LOGO
+# =========================================================
+
+logo_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "jenn_wei_logo.png"
+)
+
+header_logo, header_title = st.columns(
+    [1, 9],
+    vertical_alignment="center"
+)
+
+with header_logo:
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=85)
+    else:
+        st.warning("Logo 找不到")
+
+with header_title:
+    st.markdown(
+        """
+        <h1 style="
+            margin-top:0;
+            margin-bottom:2px;
+            padding-top:0;
+        ">
+            企業版：RFQ 詢價追蹤管理系統
+        </h1>
+        """,
+        unsafe_allow_html=True
+    )
+    st.caption("RFQ Workflow + 報價產生器 | edit by 林溫城")
 
 
 # =========================================================
