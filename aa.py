@@ -3983,7 +3983,7 @@ with tab_kpi:
         st.info("目前沒有足夠日期資料可顯示趨勢。")
     else:
         trend_df = trend_df.astype(int).sort_index()
-        st.empty().line_chart(
+        st.empty().bar_chart(
             trend_df,
             use_container_width=True
         )
