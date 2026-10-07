@@ -2401,26 +2401,24 @@ with tab_quote:
                         # =====================================================
                         # 公司抬頭
                         # =====================================================
-                        ws.merge_cells("C1:G1")
-                        ws["C1"] = "震唯機械股份有限公司"
-                        ws["C1"].font = Font(size=18, bold=True)
-                        ws["C1"].alignment = Alignment(horizontal="center", vertical="center")
+                        # 公司表頭：B:G 合併並水平/垂直置中
+                        company_header = [
+                            ("B1:G1", "B1", "震唯機械股份有限公司", 18, True),
+                            ("B2:G2", "B2", "台中市烏日區溪壩里溪南路一段680巷239號", 10, False),
+                            ("B3:G3", "B3", "TEL:886-4-23352368   FAX:886-4-23353880", 10, False),
+                            ("B4:G4", "B4", "E-mail: L3352368@ms49.hinet.net", 10, False),
+                            ("B5:G5", "B5", "Website: www.jennjwei.com", 10, False),
+                        ]
 
-                        ws.merge_cells("C2:G2")
-                        ws["C2"] = "台中市烏日區溪壩里溪南路一段680巷239號"
-                        ws["C2"].alignment = Alignment(horizontal="center")
-
-                        ws.merge_cells("C3:G3")
-                        ws["C3"] = "TEL:886-4-23352368   FAX:886-4-23353880"
-                        ws["C3"].alignment = Alignment(horizontal="center")
-
-                        ws.merge_cells("C4:G4")
-                        ws["C4"] = "E-mail: L3352368@ms49.hinet.net"
-                        ws["C4"].alignment = Alignment(horizontal="center")
-
-                        ws.merge_cells("C5:G5")
-                        ws["C5"] = "Website: www.jennjwei.com"
-                        ws["C5"].alignment = Alignment(horizontal="center")
+                        for merge_range, cell_ref, text_value, font_size, is_bold in company_header:
+                            ws.merge_cells(merge_range)
+                            cell = ws[cell_ref]
+                            cell.value = text_value
+                            cell.font = Font(size=font_size, bold=is_bold)
+                            cell.alignment = Alignment(
+                                horizontal="center",
+                                vertical="center"
+                            )
 
                         ws.row_dimensions[1].height = 26
                         ws.row_dimensions[2].height = 18
