@@ -3602,6 +3602,53 @@ with tab_gantt:
             key="gantt_show_closed"
         )
 
+        # ---------------------------------------------------------
+        # 甘特圖顯示期間
+        # ---------------------------------------------------------
+        valid_start_dates = gantt_df["_start"].dropna()
+        valid_end_dates = gantt_df["_end"].dropna()
+
+        default_period_start = (
+            valid_start_dates.min().date()
+            if not valid_start_dates.empty
+            else datetime.now().date()
+        )
+
+        default_period_end = (
+            valid_end_dates.max().date()
+            if not valid_end_dates.empty
+            else datetime.now().date() + timedelta(days=30)
+        )
+
+        if default_period_end < default_period_start:
+            default_period_end = default_period_start + timedelta(days=30)
+
+        st.markdown("#### 🗓️ 甘特圖顯示期間")
+
+        period_col1, period_col2 = st.columns(2)
+
+        with period_col1:
+            gantt_period_start = st.date_input(
+                "起始日期",
+                value=default_period_start,
+                key="gantt_period_start"
+            )
+
+        with period_col2:
+            gantt_period_end = st.date_input(
+                "結束日期",
+                value=default_period_end,
+                key="gantt_period_end"
+            )
+
+        if gantt_period_end < gantt_period_start:
+            st.error("❌ 甘特圖結束日期不可早於起始日期。")
+            st.stop()
+
+        period_start_ts = pd.Timestamp(gantt_period_start)
+        # 結束日包含整天
+        period_end_ts = pd.Timestamp(gantt_period_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+
         filtered_gantt = gantt_df.copy()
 
         if selected_owners:
@@ -3632,6 +3679,24 @@ with tab_gantt:
                 )
             )
             filtered_gantt = filtered_gantt[search_mask]
+
+        # 顯示與指定期間有交集的案件：
+        # RFQ開始日 <= 顯示期間結束日 且 RFQ結束日 >= 顯示期間起始日
+        period_overlap_mask = (
+            filtered_gantt["_start"].notna()
+            & filtered_gantt["_end"].notna()
+            & (filtered_gantt["_start"] <= period_end_ts)
+            & (filtered_gantt["_end"] >= period_start_ts)
+        )
+
+        missing_period_date_mask = (
+            filtered_gantt["_start"].isna()
+            | filtered_gantt["_end"].isna()
+        )
+
+        filtered_gantt = filtered_gantt[
+            period_overlap_mask | missing_period_date_mask
+        ]
 
         # 甘特圖需要開始日；沒有到期日則無法畫完整時程
         valid_gantt = filtered_gantt[
@@ -3695,6 +3760,11 @@ with tab_gantt:
             # -----------------------------------------------------
             # 使用 Plotly 畫真正的甘特圖
             # -----------------------------------------------------
+            st.caption(
+                f"顯示期間：{gantt_period_start.strftime('%Y-%m-%d')} ～ "
+                f"{gantt_period_end.strftime('%Y-%m-%d')}"
+            )
+
             try:
                 import plotly.express as px
 
@@ -3762,7 +3832,11 @@ with tab_gantt:
 
                 fig.update_xaxes(
                     title="日期",
-                    showgrid=True
+                    showgrid=True,
+                    range=[
+                        pd.Timestamp(gantt_period_start),
+                        pd.Timestamp(gantt_period_end) + pd.Timedelta(days=1)
+                    ]
                 )
 
                 fig.update_layout(
