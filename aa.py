@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import uuid
 import io
 import os
+import plotly.express as px
 import plotly.graph_objects as go
 
 # Excel 匯出為選用功能；即使環境尚未安裝 openpyxl，主系統仍可正常執行
