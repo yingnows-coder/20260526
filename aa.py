@@ -2761,14 +2761,20 @@ with tab_quote:
                             ),
                         ]
 
+                        # 三欄對稱配置：
+                        # 左側 Logo 34mm + 中央公司資料 108mm + 右側留白 34mm
+                        # 這樣公司資料是以整張報價內容區為基準真正置中，
+                        # 不會因左側 Logo 而向右偏移。
                         header_table = Table(
-                            [[logo_flowable, company_info]],
-                            colWidths=[34 * mm, 142 * mm],
+                            [[logo_flowable, company_info, ""]],
+                            colWidths=[34 * mm, 108 * mm, 34 * mm],
                         )
                         header_table.setStyle(
                             TableStyle([
                                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                 ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                                ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                                ("ALIGN", (2, 0), (2, 0), "CENTER"),
                                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                                 ("TOPPADDING", (0, 0), (-1, -1), 0),
