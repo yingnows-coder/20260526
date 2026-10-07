@@ -4382,8 +4382,14 @@ with tab_sales:
 
         st.caption(f"期間報價總額：{money(quote_amount)}")
 
-        product_tab, owner_tab, continent_tab, country_tab = st.tabs(
-            ["📦 產品販售分析", "👤 業務銷售分析", "🌍 洲別分析", "🌐 國家分析"]
+        product_tab, owner_tab, continent_tab, country_tab, country_purchase_tab = st.tabs(
+            [
+                "📦 產品販售分析",
+                "👤 業務銷售分析",
+                "🌍 洲別分析",
+                "🌐 國家分析",
+                "🛒 國家採購分析",
+            ]
         )
 
         with product_tab:
@@ -4590,6 +4596,160 @@ with tab_sales:
                     st.markdown("#### Top 15 國家－詢價件數")
                     st.bar_chart(
                         top_countries.set_index("國家")["詢價件數"],
+                        use_container_width=True
+                    )
+
+        with country_purchase_tab:
+            st.markdown("#### 🛒 國家採購分析")
+            st.caption(
+                "以「已成交」案件代表實際採購；可查看各國採購產品、採購次數、採購金額、產品組合與主要市場。"
+            )
+
+            purchase_df = analysis_df[
+                (analysis_df["_won"])
+                & (analysis_df["country"].astype(str).str.strip() != "")
+                & (analysis_df["country"] != "未分類")
+            ].copy()
+
+            if purchase_df.empty:
+                st.info("目前分析期間內尚無已成交且已填國家的採購資料。")
+            else:
+                # Country filter
+                purchase_countries = sorted(
+                    purchase_df["country"].dropna().astype(str).unique().tolist()
+                )
+                selected_purchase_countries = st.multiselect(
+                    "篩選國家",
+                    purchase_countries,
+                    default=purchase_countries,
+                    key="country_purchase_filter"
+                )
+
+                filtered_purchase = purchase_df[
+                    purchase_df["country"].isin(selected_purchase_countries)
+                ].copy()
+
+                # Country-level purchasing summary
+                country_purchase_summary = (
+                    filtered_purchase.groupby(["continent", "country"], dropna=False)
+                    .agg(
+                        採購案件數=("RFQ_ID", "size"),
+                        採購客戶數=("customer", lambda x: x[x.astype(str).str.strip() != ""].nunique()),
+                        採購金額=("_deal_amount", "sum"),
+                        採購產品種類=("_analysis_model", lambda x: x[x.astype(str).str.strip() != ""].nunique()),
+                    )
+                    .reset_index()
+                    .rename(columns={"continent": "洲別", "country": "國家"})
+                )
+
+                country_purchase_summary["平均每案採購金額"] = (
+                    country_purchase_summary["採購金額"]
+                    / country_purchase_summary["採購案件數"].replace(0, pd.NA)
+                ).fillna(0).round(0)
+
+                country_purchase_summary = country_purchase_summary.sort_values(
+                    ["採購金額", "採購案件數"], ascending=False
+                )
+
+                cp1, cp2, cp3, cp4 = st.columns(4)
+                cp1.metric("採購國家數", f"{filtered_purchase['country'].nunique()} 國")
+                cp2.metric("採購案件數", f"{len(filtered_purchase)} 件")
+                cp3.metric("採購客戶數", f"{filtered_purchase['customer'].replace('', pd.NA).dropna().nunique()} 家")
+                cp4.metric("採購總金額", money(float(filtered_purchase["_deal_amount"].sum())))
+
+                st.markdown("##### 各國採購總覽")
+                st.dataframe(
+                    country_purchase_summary,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                st.markdown("##### 各國採購金額排名")
+                st.bar_chart(
+                    country_purchase_summary.set_index("國家")["採購金額"],
+                    use_container_width=True
+                )
+
+                # Country x model purchasing matrix/detail
+                country_model_purchase = (
+                    filtered_purchase.groupby(
+                        ["continent", "country", "_analysis_category", "_analysis_model"],
+                        dropna=False
+                    )
+                    .agg(
+                        採購次數=("RFQ_ID", "size"),
+                        採購金額=("_deal_amount", "sum"),
+                        客戶數=("customer", lambda x: x[x.astype(str).str.strip() != ""].nunique()),
+                    )
+                    .reset_index()
+                    .rename(
+                        columns={
+                            "continent": "洲別",
+                            "country": "國家",
+                            "_analysis_category": "產品分類",
+                            "_analysis_model": "產品型號",
+                        }
+                    )
+                )
+
+                country_model_purchase = country_model_purchase[
+                    country_model_purchase["產品型號"].astype(str).str.strip() != ""
+                ].sort_values(
+                    ["採購金額", "採購次數"], ascending=False
+                )
+
+                st.markdown("##### 國家 × 產品採購明細")
+                st.dataframe(
+                    country_model_purchase,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                # Top product per country
+                if not country_model_purchase.empty:
+                    top_product_by_country = (
+                        country_model_purchase.sort_values(
+                            ["國家", "採購金額", "採購次數"],
+                            ascending=[True, False, False]
+                        )
+                        .groupby("國家", as_index=False)
+                        .first()
+                    )
+
+                    top_product_by_country = top_product_by_country[
+                        ["國家", "產品分類", "產品型號", "採購次數", "採購金額"]
+                    ]
+
+                    st.markdown("##### 各國主要採購產品")
+                    st.dataframe(
+                        top_product_by_country,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                # Monthly purchasing trend by country
+                trend_df = filtered_purchase[
+                    filtered_purchase["_deal_dt"].notna()
+                ].copy()
+
+                if not trend_df.empty:
+                    trend_df["月份"] = trend_df["_deal_dt"].dt.to_period("M").astype(str)
+                    monthly_country_purchase = (
+                        trend_df.groupby(["月份", "country"])["_deal_amount"]
+                        .sum()
+                        .reset_index()
+                        .rename(columns={"country": "國家", "_deal_amount": "採購金額"})
+                    )
+
+                    pivot_purchase = monthly_country_purchase.pivot(
+                        index="月份",
+                        columns="國家",
+                        values="採購金額"
+                    ).fillna(0)
+
+                    st.markdown("##### 各國每月採購趨勢")
+                    st.line_chart(
+                        pivot_purchase,
                         use_container_width=True
                     )
 
