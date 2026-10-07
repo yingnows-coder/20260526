@@ -4917,9 +4917,40 @@ with tab_sales:
                 st.markdown("#### 產品型號績效")
                 st.dataframe(model_summary, use_container_width=True, hide_index=True)
 
-                top_models = model_summary.head(10).set_index("產品型號")
+                top_models = model_summary.head(10).copy()
                 st.markdown("#### Top 10 型號－成交金額")
-                st.bar_chart(top_models["成交金額"], use_container_width=True)
+
+                # 使用 Plotly，固定型號文字為橫式顯示
+                fig_top_models = px.bar(
+                    top_models,
+                    x="產品型號",
+                    y="成交金額",
+                    text="成交金額",
+                    labels={
+                        "產品型號": "產品型號",
+                        "成交金額": "成交金額",
+                    },
+                )
+                fig_top_models.update_xaxes(
+                    tickangle=0,
+                    automargin=True,
+                )
+                fig_top_models.update_traces(
+                    texttemplate="%{text:,.0f}",
+                    textposition="outside",
+                    cliponaxis=False,
+                )
+                fig_top_models.update_layout(
+                    xaxis_title="產品型號",
+                    yaxis_title="成交金額",
+                    showlegend=False,
+                    margin=dict(b=90, t=20),
+                )
+                st.plotly_chart(
+                    fig_top_models,
+                    use_container_width=True,
+                    key="top10_model_sales_bar",
+                )
 
         with owner_tab:
             owner_summary = (
