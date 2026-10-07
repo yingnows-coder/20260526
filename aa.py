@@ -679,6 +679,30 @@ with tab_rfq:
     )
 
 
+    # 產品分類 / 型號必須放在 st.form 外面，
+    # 才能在切換分類時立即重新執行並更新第二層型號選單。
+    p1, p2 = st.columns([1.6, 1])
+
+    with p1:
+        new_product_category = st.selectbox(
+            "🏷️ 產品分類",
+            ["請選擇"] + PRODUCT_CATEGORIES,
+            key="new_product_category"
+        )
+
+    with p2:
+        model_options = (
+            PRODUCT_MODELS.get(new_product_category, [])
+            if new_product_category != "請選擇"
+            else []
+        )
+
+        new_product_model = st.selectbox(
+            "⚙️ 產品型號",
+            ["請選擇"] + model_options,
+            key="new_product_model"
+        )
+
     with st.form(
         "rfq_form",
         clear_on_submit=True
@@ -717,27 +741,6 @@ with tab_rfq:
             )
 
 
-        p1, p2 = st.columns([1.6, 1])
-
-        with p1:
-            new_product_category = st.selectbox(
-                "🏷️ 產品分類",
-                ["請選擇"] + PRODUCT_CATEGORIES,
-                key="new_product_category"
-            )
-
-        with p2:
-            model_options = (
-                PRODUCT_MODELS.get(new_product_category, [])
-                if new_product_category != "請選擇"
-                else []
-            )
-            new_product_model = st.selectbox(
-                "⚙️ 產品型號",
-                ["請選擇"] + model_options,
-                key="new_product_model"
-            )
-
         c4, c5 = st.columns(
             [2, 1]
         )
@@ -750,7 +753,8 @@ with tab_rfq:
             )
             new_title = st.text_input(
                 "📌 詢價名稱",
-                value=default_title
+                value=default_title,
+                key=f"new_title_{new_product_model}"
             )
 
         with c5:
