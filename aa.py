@@ -114,7 +114,9 @@ RFQ_COLUMNS = [
     "sales_result",
     "deal_date",
     "deal_amount",
-    "lost_reason"
+    "lost_reason",
+    "continent",
+    "country"
 ]
 
 
@@ -216,6 +218,75 @@ PRODUCT_MODELS = {
     "Lifting Machine": ["KLFM-200"],
 }
 PRODUCT_CATEGORIES = list(PRODUCT_MODELS.keys())
+
+
+# =========================================================
+# 全球洲別 / 國家主檔
+# =========================================================
+CONTINENT_COUNTRIES = {
+    "亞洲": [
+        "台灣", "中國", "日本", "韓國", "北韓", "蒙古",
+        "香港", "澳門",
+        "新加坡", "馬來西亞", "泰國", "越南", "菲律賓", "印尼",
+        "汶萊", "柬埔寨", "寮國", "緬甸", "東帝汶",
+        "印度", "巴基斯坦", "孟加拉", "斯里蘭卡", "尼泊爾",
+        "不丹", "馬爾地夫", "阿富汗",
+        "哈薩克", "烏茲別克", "土庫曼", "吉爾吉斯", "塔吉克",
+        "亞美尼亞", "亞塞拜然", "喬治亞",
+        "土耳其", "以色列", "巴勒斯坦", "約旦", "黎巴嫩", "敘利亞",
+        "伊拉克", "伊朗", "沙烏地阿拉伯", "阿拉伯聯合大公國",
+        "卡達", "科威特", "巴林", "阿曼", "葉門"
+    ],
+    "歐洲": [
+        "英國", "愛爾蘭", "法國", "德國", "義大利", "西班牙",
+        "葡萄牙", "荷蘭", "比利時", "盧森堡", "瑞士", "奧地利",
+        "丹麥", "瑞典", "挪威", "芬蘭", "冰島",
+        "波蘭", "捷克", "斯洛伐克", "匈牙利", "羅馬尼亞",
+        "保加利亞", "希臘", "克羅埃西亞", "斯洛維尼亞",
+        "塞爾維亞", "波士尼亞與赫塞哥維納", "蒙特內哥羅",
+        "北馬其頓", "阿爾巴尼亞", "科索沃",
+        "愛沙尼亞", "拉脫維亞", "立陶宛", "烏克蘭", "白俄羅斯",
+        "摩爾多瓦", "俄羅斯",
+        "賽普勒斯", "馬爾他", "安道爾", "摩納哥", "列支敦斯登",
+        "聖馬利諾", "梵蒂岡"
+    ],
+    "北美洲": [
+        "美國", "加拿大", "墨西哥",
+        "瓜地馬拉", "貝里斯", "宏都拉斯", "薩爾瓦多",
+        "尼加拉瓜", "哥斯大黎加", "巴拿馬",
+        "巴哈馬", "古巴", "牙買加", "海地", "多明尼加",
+        "安地卡及巴布達", "巴貝多", "多米尼克", "格瑞那達",
+        "聖克里斯多福及尼維斯", "聖露西亞",
+        "聖文森及格瑞那丁", "千里達及托巴哥"
+    ],
+    "南美洲": [
+        "巴西", "阿根廷", "智利", "秘魯", "哥倫比亞",
+        "委內瑞拉", "厄瓜多", "玻利維亞", "巴拉圭",
+        "烏拉圭", "蓋亞那", "蘇利南"
+    ],
+    "非洲": [
+        "南非", "埃及", "摩洛哥", "阿爾及利亞", "突尼西亞",
+        "利比亞", "蘇丹", "南蘇丹", "衣索比亞", "厄利垂亞",
+        "吉布地", "索馬利亞", "肯亞", "烏干達", "坦尚尼亞",
+        "盧安達", "蒲隆地",
+        "奈及利亞", "迦納", "象牙海岸", "塞內加爾", "馬利",
+        "尼日", "查德", "茅利塔尼亞", "甘比亞", "幾內亞",
+        "幾內亞比索", "獅子山", "賴比瑞亞", "布吉納法索",
+        "貝南", "多哥", "維德角",
+        "喀麥隆", "中非共和國", "赤道幾內亞", "加彭",
+        "剛果共和國", "剛果民主共和國", "聖多美普林西比",
+        "安哥拉", "尚比亞", "辛巴威", "馬拉威", "莫三比克",
+        "納米比亞", "波札那", "賴索托", "史瓦帝尼",
+        "馬達加斯加", "模里西斯", "塞席爾", "葛摩"
+    ],
+    "大洋洲": [
+        "澳洲", "紐西蘭", "巴布亞紐幾內亞", "斐濟",
+        "索羅門群島", "萬那杜", "薩摩亞", "東加",
+        "吉里巴斯", "吐瓦魯", "諾魯", "帛琉",
+        "密克羅尼西亞聯邦", "馬紹爾群島"
+    ]
+}
+CONTINENTS = list(CONTINENT_COUNTRIES.keys())
 
 
 STATUS_NEXT_STEP = {
@@ -709,6 +780,27 @@ with tab_rfq:
             key="new_product_model"
         )
 
+    g1, g2 = st.columns([1, 1.5])
+
+    with g1:
+        new_continent = st.selectbox(
+            "🌍 洲別",
+            ["請選擇"] + CONTINENTS,
+            key="new_continent"
+        )
+
+    with g2:
+        country_options = (
+            CONTINENT_COUNTRIES.get(new_continent, [])
+            if new_continent != "請選擇"
+            else []
+        )
+        new_country = st.selectbox(
+            "🌐 國家",
+            ["請選擇"] + country_options,
+            key="new_country"
+        )
+
     with st.form(
         "rfq_form",
         clear_on_submit=True
@@ -931,7 +1023,47 @@ with tab_rfq:
                 "first_followup_due":
                     first_followup.strftime(
                         "%Y-%m-%d"
-                    )
+                    ),
+
+                "product_category":
+                    (
+                        new_product_category
+                        if new_product_category != "請選擇"
+                        else ""
+                    ),
+
+                "product_model":
+                    (
+                        new_product_model
+                        if new_product_model != "請選擇"
+                        else ""
+                    ),
+
+                "continent":
+                    (
+                        new_continent
+                        if new_continent != "請選擇"
+                        else ""
+                    ),
+
+                "country":
+                    (
+                        new_country
+                        if new_country != "請選擇"
+                        else ""
+                    ),
+
+                "sales_result":
+                    "進行中",
+
+                "deal_date":
+                    "",
+
+                "deal_amount":
+                    0.0,
+
+                "lost_reason":
+                    ""
 
             }
 
@@ -4132,6 +4264,8 @@ with tab_sales:
         "status": "",
         "RFQ_ID": "",
         "title": "",
+        "continent": "",
+        "country": "",
     }
     for col, default in sales_defaults.items():
         if col not in sales_df.columns:
@@ -4142,6 +4276,8 @@ with tab_sales:
     sales_df["owner"] = sales_df["owner"].fillna("待確認").astype(str).replace("", "待確認")
     sales_df["customer"] = sales_df["customer"].fillna("").astype(str)
     sales_df["sales_result"] = sales_df["sales_result"].fillna("進行中").astype(str).replace("", "進行中")
+    sales_df["continent"] = sales_df["continent"].fillna("").astype(str).replace("", "未分類")
+    sales_df["country"] = sales_df["country"].fillna("").astype(str).replace("", "未分類")
     sales_df["_created_dt"] = pd.to_datetime(sales_df["created_time"], errors="coerce")
     sales_df["_deal_dt"] = pd.to_datetime(sales_df["deal_date"], errors="coerce")
     sales_df["_deal_amount"] = pd.to_numeric(sales_df["deal_amount"], errors="coerce").fillna(0.0)
@@ -4246,7 +4382,9 @@ with tab_sales:
 
         st.caption(f"期間報價總額：{money(quote_amount)}")
 
-        product_tab, owner_tab = st.tabs(["📦 產品販售分析", "👤 業務銷售分析"])
+        product_tab, owner_tab, continent_tab, country_tab = st.tabs(
+            ["📦 產品販售分析", "👤 業務銷售分析", "🌍 洲別分析", "🌐 國家分析"]
+        )
 
         with product_tab:
             category_summary = (
@@ -4353,6 +4491,107 @@ with tab_sales:
                     owner_summary.set_index("業務")["成交金額"],
                     use_container_width=True
                 )
+
+        with continent_tab:
+            continent_summary = (
+                analysis_df.groupby("continent", dropna=False)
+                .agg(
+                    詢價件數=("RFQ_ID", "size"),
+                    客戶數=("customer", lambda x: x[x.astype(str).str.strip() != ""].nunique()),
+                    報價件數=("_quoted", "sum"),
+                    報價金額=("報價金額", "sum"),
+                    成交件數=("_won", "sum"),
+                    成交金額=("_deal_amount", lambda x: x[analysis_df.loc[x.index, "_won"]].sum()),
+                )
+                .reset_index()
+                .rename(columns={"continent": "洲別"})
+            )
+
+            if continent_summary.empty:
+                st.info("目前期間內沒有洲別資料。")
+            else:
+                continent_summary["成交率 (%)"] = (
+                    continent_summary["成交件數"]
+                    / continent_summary["報價件數"].replace(0, pd.NA)
+                    * 100
+                ).fillna(0).round(1)
+
+                continent_summary = continent_summary.sort_values(
+                    ["成交金額", "成交件數", "詢價件數"],
+                    ascending=False
+                )
+
+                st.markdown("#### 洲別銷售績效")
+                st.dataframe(
+                    continent_summary,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                st.markdown("#### 各洲成交金額")
+                st.bar_chart(
+                    continent_summary.set_index("洲別")["成交金額"],
+                    use_container_width=True
+                )
+
+                st.markdown("#### 各洲詢價件數")
+                st.bar_chart(
+                    continent_summary.set_index("洲別")["詢價件數"],
+                    use_container_width=True
+                )
+
+        with country_tab:
+            country_summary = (
+                analysis_df.groupby(["continent", "country"], dropna=False)
+                .agg(
+                    詢價件數=("RFQ_ID", "size"),
+                    客戶數=("customer", lambda x: x[x.astype(str).str.strip() != ""].nunique()),
+                    報價件數=("_quoted", "sum"),
+                    報價金額=("報價金額", "sum"),
+                    成交件數=("_won", "sum"),
+                    成交金額=("_deal_amount", lambda x: x[analysis_df.loc[x.index, "_won"]].sum()),
+                )
+                .reset_index()
+                .rename(columns={"continent": "洲別", "country": "國家"})
+            )
+
+            if country_summary.empty:
+                st.info("目前期間內沒有國家資料。")
+            else:
+                country_summary["成交率 (%)"] = (
+                    country_summary["成交件數"]
+                    / country_summary["報價件數"].replace(0, pd.NA)
+                    * 100
+                ).fillna(0).round(1)
+
+                country_summary = country_summary.sort_values(
+                    ["成交金額", "成交件數", "詢價件數"],
+                    ascending=False
+                )
+
+                st.markdown("#### 國家銷售績效")
+                st.dataframe(
+                    country_summary,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                top_countries = country_summary[
+                    country_summary["國家"] != "未分類"
+                ].head(15)
+
+                if not top_countries.empty:
+                    st.markdown("#### Top 15 國家－成交金額")
+                    st.bar_chart(
+                        top_countries.set_index("國家")["成交金額"],
+                        use_container_width=True
+                    )
+
+                    st.markdown("#### Top 15 國家－詢價件數")
+                    st.bar_chart(
+                        top_countries.set_index("國家")["詢價件數"],
+                        use_container_width=True
+                    )
 
         # 未成交原因
         lost_df = analysis_df[analysis_df["sales_result"] == "未成交"].copy()
