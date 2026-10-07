@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 import uuid
 import io
 
+
 # =========================================================
-# 基本設定
+# 1. 基本設定
 # =========================================================
 
 st.set_page_config(
@@ -20,12 +21,13 @@ st.caption("RFQ Workflow + 報價產生器 | edit by 林溫城")
 
 
 # =========================================================
-# BB 頁面
+# 2. BB 頁面
 # =========================================================
 
 top1, top2 = st.columns([8, 1])
 
 with top2:
+
     st.link_button(
         "📊 BB頁面",
         "https://aazzyybb.streamlit.app/"
@@ -33,7 +35,7 @@ with top2:
 
 
 # =========================================================
-# Google Sheets
+# 3. Google Sheets
 # =========================================================
 
 conn = st.connection(
@@ -43,10 +45,11 @@ conn = st.connection(
 
 
 # =========================================================
-# RFQ 欄位
+# 4. RFQ 欄位
 # =========================================================
 
 RFQ_COLUMNS = [
+
     "id",
     "RFQ_ID",
     "version",
@@ -64,14 +67,16 @@ RFQ_COLUMNS = [
     "approved_quote",
     "quote_sent",
     "first_followup_due"
+
 ]
 
 
 # =========================================================
-# 報價欄位
+# 5. Quote 欄位
 # =========================================================
 
 QUOTE_COLUMNS = [
+
     "quote_id",
     "RFQ_ID",
     "quote_version",
@@ -82,6 +87,7 @@ QUOTE_COLUMNS = [
     "quantity",
     "currency",
     "unit",
+
     "material_cost",
     "processing_cost",
     "outsourcing_cost",
@@ -89,36 +95,48 @@ QUOTE_COLUMNS = [
     "packing_cost",
     "transport_cost",
     "other_cost",
+
     "total_cost",
+
     "management_rate",
     "management_cost",
+
     "profit_rate",
     "profit_amount",
+
     "discount",
+
     "quote_unit_price",
     "quote_total",
+
     "tax_rate",
     "tax_amount",
     "grand_total",
+
     "payment_terms",
     "incoterms",
     "delivery",
     "lead_time",
     "validity",
     "remark",
+
     "approved",
     "approved_time",
+
     "sent",
     "sent_time",
+
     "created_time"
+
 ]
 
 
 # =========================================================
-# 狀態
+# 6. RFQ 狀態
 # =========================================================
 
 RFQ_STATUS = [
+
     "新詢價",
     "待補件",
     "工程評估",
@@ -126,6 +144,7 @@ RFQ_STATUS = [
     "已報價",
     "追蹤中",
     "結案"
+
 ]
 
 
@@ -151,30 +170,42 @@ STATUS_NEXT_STEP = {
 
     "結案":
         "完成案件結案紀錄"
+
 }
 
 
 # =========================================================
-# Boolean 工具
+# 7. Boolean 工具
 # =========================================================
 
 BOOLEAN_COLUMNS = [
+
     "approved_quote",
     "quote_sent"
+
 ]
 
 
 def to_bool(value):
 
-    if pd.isna(value):
+    if value is None:
         return False
 
     if isinstance(value, bool):
         return value
 
+    try:
+
+        if pd.isna(value):
+            return False
+
+    except Exception:
+        pass
+
     value = str(value).strip().lower()
 
     return value in [
+
         "true",
         "1",
         "yes",
@@ -182,6 +213,7 @@ def to_bool(value):
         "是",
         "已核准",
         "已寄送"
+
     ]
 
 
@@ -205,15 +237,12 @@ def normalize_boolean_columns(dataframe):
 
 
 # =========================================================
-# 數字工具
+# 8. 數字工具
 # =========================================================
 
 def to_float(value):
 
     if value is None:
-        return 0.0
-
-    if isinstance(value, bool):
         return 0.0
 
     try:
@@ -244,7 +273,7 @@ def money(value):
 
 
 # =========================================================
-# 下一個工作日
+# 9. 下一個工作日
 # =========================================================
 
 def next_workday(date_value):
@@ -259,7 +288,53 @@ def next_workday(date_value):
 
 
 # =========================================================
-# RFQ DataFrame 初始化
+# 10. Status 驗證
+# =========================================================
+
+def validate_status(row, new_status):
+
+    if new_status != "已報價":
+
+        return True, ""
+
+
+    approved = to_bool(
+        row.get(
+            "approved_quote",
+            False
+        )
+    )
+
+
+    sent = to_bool(
+        row.get(
+            "quote_sent",
+            False
+        )
+    )
+
+
+    if not approved:
+
+        return False, (
+            "❌ 不可標記「已報價」："
+            "報價尚未核准。"
+        )
+
+
+    if not sent:
+
+        return False, (
+            "❌ 不可標記「已報價」："
+            "尚未記錄實際寄送。"
+        )
+
+
+    return True, ""
+
+
+# =========================================================
+# 11. 讀取 Tasks
 # =========================================================
 
 try:
@@ -269,7 +344,22 @@ try:
         ttl=0
     )
 
-except Exception:
+except Exception as e:
+
+    st.error(
+        "❌ 無法讀取 Google Sheets 的 Tasks"
+    )
+
+    st.exception(e)
+
+    st.stop()
+
+
+# =========================================================
+# 12. 初始化 Tasks
+# =========================================================
+
+if df is None:
 
     df = pd.DataFrame()
 
@@ -282,9 +372,9 @@ if df.empty:
 
 else:
 
-    # -----------------------------------------
+    # -----------------------------------------------------
     # 補欄位
-    # -----------------------------------------
+    # -----------------------------------------------------
 
     for col in RFQ_COLUMNS:
 
@@ -306,80 +396,88 @@ else:
 
                 df[col] = ""
 
-    # -----------------------------------------
-    # ID
-    # -----------------------------------------
 
-    if "id" not in df.columns:
+# =========================================================
+# 13. ID 防呆
+# =========================================================
 
-        df["id"] = [
-            str(uuid.uuid4())
-            for _ in range(len(df))
-        ]
+if "id" not in df.columns:
 
-    # -----------------------------------------
-    # RFQ ID
-    # -----------------------------------------
+    df["id"] = ""
 
-    if "RFQ_ID" not in df.columns:
 
-        df["RFQ_ID"] = [
+for idx in df.index:
 
-            f"RFQ-{datetime.now().strftime('%Y%m%d')}-"
-            f"{str(uuid.uuid4())[:4].upper()}"
+    current_id = df.loc[idx, "id"]
 
-            for _ in range(len(df))
-        ]
+    if (
+        current_id is None
+        or str(current_id).strip() == ""
+        or str(current_id).lower() == "nan"
+    ):
+
+        df.loc[idx, "id"] = str(
+            uuid.uuid4()
+        )
 
 
 # =========================================================
-# Boolean 修正
+# 14. RFQ_ID 防呆
+# =========================================================
+
+if "RFQ_ID" not in df.columns:
+
+    df["RFQ_ID"] = ""
+
+
+for idx in df.index:
+
+    current_rfq = df.loc[
+        idx,
+        "RFQ_ID"
+    ]
+
+    if (
+        current_rfq is None
+        or str(current_rfq).strip() == ""
+        or str(current_rfq).lower() == "nan"
+    ):
+
+        df.loc[
+            idx,
+            "RFQ_ID"
+        ] = (
+            f"RFQ-"
+            f"{datetime.now().strftime('%Y%m%d')}-"
+            f"{str(uuid.uuid4())[:4].upper()}"
+        )
+
+
+# =========================================================
+# 15. 狀態防呆
+# =========================================================
+
+if "status" not in df.columns:
+
+    df["status"] = "新詢價"
+
+
+df["status"] = (
+    df["status"]
+    .fillna("新詢價")
+    .astype(str)
+)
+
+
+# =========================================================
+# 16. Boolean 正規化
 # =========================================================
 
 df = normalize_boolean_columns(df)
 
 
 # =========================================================
-# 狀態驗證
-# =========================================================
-
-def validate_status(row, new_status):
-
-    if new_status == "已報價":
-
-        approved = to_bool(
-            row.get(
-                "approved_quote",
-                False
-            )
-        )
-
-        sent = to_bool(
-            row.get(
-                "quote_sent",
-                False
-            )
-        )
-
-        if not approved:
-
-            return False, (
-                "❌ 不可標記「已報價」："
-                "報價尚未核准。"
-            )
-
-        if not sent:
-
-            return False, (
-                "❌ 不可標記「已報價」："
-                "尚未記錄實際寄送。"
-            )
-
-    return True, ""
-
-
-# =========================================================
-# Status Log
+# 17. StatusLog
 # =========================================================
 
 def save_status_log(
@@ -401,13 +499,20 @@ def save_status_log(
         log_df = pd.DataFrame()
 
 
+    if log_df is None:
+
+        log_df = pd.DataFrame()
+
+
     log_columns = [
+
         "log_id",
         "RFQ_ID",
         "change_time",
         "old_status",
         "new_status",
         "evidence"
+
     ]
 
 
@@ -418,7 +523,14 @@ def save_status_log(
         )
 
 
-    log_data = {
+    for col in log_columns:
+
+        if col not in log_df.columns:
+
+            log_df[col] = ""
+
+
+    new_log = {
 
         "log_id":
             str(uuid.uuid4()),
@@ -439,45 +551,66 @@ def save_status_log(
 
         "evidence":
             evidence
+
     }
 
 
     log_df = pd.concat(
+
         [
             log_df,
-            pd.DataFrame([log_data])
+            pd.DataFrame(
+                [new_log]
+            )
         ],
+
         ignore_index=True
+
     )
 
 
-    conn.update(
-        worksheet="StatusLog",
-        data=log_df
-    )
+    try:
+
+        conn.update(
+            worksheet="StatusLog",
+            data=log_df
+        )
+
+    except Exception as e:
+
+        st.warning(
+            "⚠️ StatusLog 寫入失敗"
+        )
+
+        st.exception(e)
 
 
 # =========================================================
-# Tabs
+# 18. 頁面 Tabs
 # =========================================================
 
 tab_rfq, tab_board, tab_quote, tab_log = st.tabs(
+
     [
         "📋 RFQ追蹤表",
         "📊 RFQ看板",
         "💰 報價產生器",
         "📜 StatusLog"
     ]
+
 )
 
 
-# =========================================================
-# TAB 1：RFQ 追蹤
-# =========================================================
+# ################################################################
+# TAB 1：RFQ
+# ################################################################
 
 with tab_rfq:
 
-    st.subheader("📝 建立新詢價 RFQ")
+    st.subheader(
+        "📝 建立新詢價 RFQ"
+    )
+
 
     with st.form(
         "rfq_form",
@@ -487,6 +620,7 @@ with tab_rfq:
         c1, c2, c3 = st.columns(
             [1, 2, 1]
         )
+
 
         with c1:
 
@@ -500,11 +634,13 @@ with tab_rfq:
                 ]
             )
 
+
         with c2:
 
             new_customer = st.text_input(
                 "🏭 客戶資訊"
             )
+
 
         with c3:
 
@@ -518,11 +654,13 @@ with tab_rfq:
             [2, 1]
         )
 
+
         with c4:
 
             new_title = st.text_input(
                 "📌 詢價名稱"
             )
+
 
         with c5:
 
@@ -551,8 +689,7 @@ with tab_rfq:
 
 
         has_due_date = st.checkbox(
-            "設定到期日",
-            value=False
+            "設定到期日"
         )
 
 
@@ -588,15 +725,18 @@ with tab_rfq:
 
             now_dt = datetime.now()
 
+
             now = now_dt.strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
 
 
             rfq_id = (
-                f"RFQ-"
+
+                "RFQ-"
                 f"{now_dt.strftime('%Y%m%d')}-"
                 f"{str(uuid.uuid4())[:4].upper()}"
+
             )
 
 
@@ -632,18 +772,20 @@ with tab_rfq:
                     rfq_id,
 
                 "version":
-                    new_version.strip()
-                    if new_version.strip()
-                    else "V1",
+                    (
+                        new_version.strip()
+                        if new_version.strip()
+                        else "V1"
+                    ),
 
                 "department":
                     new_department,
 
                 "customer":
-                    new_customer,
+                    new_customer.strip(),
 
                 "title":
-                    new_title,
+                    new_title.strip(),
 
                 "status":
                     "新詢價",
@@ -666,14 +808,18 @@ with tab_rfq:
                     now,
 
                 "evidence":
-                    new_evidence.strip()
-                    if new_evidence.strip()
-                    else "待確認",
+                    (
+                        new_evidence.strip()
+                        if new_evidence.strip()
+                        else "待確認"
+                    ),
 
                 "exception":
-                    new_exception.strip()
-                    if new_exception.strip()
-                    else "待確認",
+                    (
+                        new_exception.strip()
+                        if new_exception.strip()
+                        else "待確認"
+                    ),
 
                 "approved_quote":
                     False,
@@ -685,15 +831,21 @@ with tab_rfq:
                     first_followup.strftime(
                         "%Y-%m-%d"
                     )
+
             }
 
 
             df = pd.concat(
+
                 [
                     df,
-                    pd.DataFrame([new_data])
+                    pd.DataFrame(
+                        [new_data]
+                    )
                 ],
+
                 ignore_index=True
+
             )
 
 
@@ -702,27 +854,44 @@ with tab_rfq:
             )
 
 
-            conn.update(
-                worksheet="Tasks",
-                data=df
-            )
+            try:
+
+                conn.update(
+                    worksheet="Tasks",
+                    data=df
+                )
 
 
-            save_status_log(
-                rfq_id,
-                "無",
-                "新詢價",
-                new_evidence.strip()
-                if new_evidence.strip()
-                else "待確認"
-            )
+                save_status_log(
+
+                    rfq_id,
+                    "無",
+                    "新詢價",
+
+                    (
+                        new_evidence.strip()
+                        if new_evidence.strip()
+                        else "待確認"
+                    )
+
+                )
 
 
-            st.success(
-                f"✅ RFQ 建立成功：{rfq_id}"
-            )
+                st.success(
+                    f"✅ RFQ 建立成功：{rfq_id}"
+                )
 
-            st.rerun()
+
+                st.rerun()
+
+
+            except Exception as e:
+
+                st.error(
+                    "❌ RFQ 寫入 Google Sheets 失敗"
+                )
+
+                st.exception(e)
 
 
     st.divider()
@@ -732,14 +901,20 @@ with tab_rfq:
     # 快捷搜尋
     # =====================================================
 
-    st.subheader("🔎 RFQ 快捷搜尋")
+    st.subheader(
+        "🔎 RFQ 快捷搜尋"
+    )
+
 
     search_keyword = st.text_input(
-        "搜尋 RFQ、客戶、產品、負責人、證據、異常",
+
+        "搜尋 RFQ、客戶、詢價名稱、負責人、證據、異常",
+
         placeholder=(
             "例如：RFQ-20261007、"
-            "ABC、業務承辦..."
+            "ABC、業務承辦"
         )
+
     )
 
 
@@ -749,31 +924,45 @@ with tab_rfq:
 
             df.astype(str)
             .apply(
+
                 lambda col:
+
                 col.str.contains(
+
                     search_keyword,
+
                     case=False,
+
                     na=False,
+
                     regex=False
+
                 )
+
             )
+
             .any(axis=1)
+
         )
+
 
         display_df = df[
             search_mask
-        ]
+        ].copy()
 
     else:
 
-        display_df = df
+        display_df = df.copy()
 
 
     # =====================================================
     # 統計
     # =====================================================
 
-    st.subheader("📊 RFQ 狀態統計")
+    st.subheader(
+        "📊 RFQ 狀態統計"
+    )
+
 
     stat_cols = st.columns(
         len(RFQ_STATUS)
@@ -791,6 +980,7 @@ with tab_rfq:
             ]
         )
 
+
         with col:
 
             st.metric(
@@ -803,10 +993,13 @@ with tab_rfq:
     # 追蹤表
     # =====================================================
 
-    st.subheader("📋 RFQ 追蹤表")
+    st.subheader(
+        "📋 RFQ 追蹤表"
+    )
 
 
     tracking_columns = [
+
         "RFQ_ID",
         "version",
         "customer",
@@ -818,6 +1011,7 @@ with tab_rfq:
         "updated_time",
         "evidence",
         "exception"
+
     ]
 
 
@@ -829,32 +1023,76 @@ with tab_rfq:
 
     else:
 
+        # 防止舊資料缺欄位造成 KeyError
+
+        safe_columns = [
+
+            col
+            for col in tracking_columns
+            if col in display_df.columns
+
+        ]
+
+
         st.dataframe(
+
             display_df[
-                tracking_columns
+                safe_columns
             ],
+
             use_container_width=True,
+
             hide_index=True
+
         )
 
 
-# =========================================================
-# TAB 2：看板
-# =========================================================
+# ################################################################
+# TAB 2：KANBAN
+# ################################################################
 
 with tab_board:
 
-    st.subheader("📊 RFQ 管理看板")
+    st.subheader(
+        "📊 RFQ 管理看板"
+    )
+
 
     board_cols = st.columns(
         len(RFQ_STATUS)
     )
 
 
+    # =========================================================
+    # Render Tasks
+    #
+    # 重要：
+    # 不再依賴 render_tasks 外部重新搜尋 df。
+    # 直接使用傳入的 full_df。
+    # =========================================================
+
     def render_tasks(
         task_df,
-        column_name
+        column_name,
+        full_df
     ):
+
+        # -----------------------------------------------------
+        # 防呆 1
+        # -----------------------------------------------------
+
+        if task_df is None:
+
+            st.warning(
+                f"⚠️ {column_name} 資料為 None"
+            )
+
+            return
+
+
+        # -----------------------------------------------------
+        # 防呆 2
+        # -----------------------------------------------------
 
         if task_df.empty:
 
@@ -865,87 +1103,194 @@ with tab_board:
             return
 
 
+        # -----------------------------------------------------
+        # 防呆 3
+        # -----------------------------------------------------
+
+        if full_df is None:
+
+            st.error(
+                "❌ 完整 RFQ DataFrame 不存在"
+            )
+
+            return
+
+
+        # -----------------------------------------------------
+        # 防呆 4
+        # -----------------------------------------------------
+
+        if "id" not in full_df.columns:
+
+            st.error(
+                "❌ Tasks 缺少 id 欄位"
+            )
+
+            st.write(
+                "目前 Tasks 欄位：",
+                list(full_df.columns)
+            )
+
+            return
+
+
+        # -----------------------------------------------------
+        # 每張卡片
+        # -----------------------------------------------------
+
         for _, row in task_df.iterrows():
 
-            matches = df[
-                df["id"] == row["id"]
-            ].index
+            row_id = row.get(
+                "id",
+                ""
+            )
+
+
+            # -------------------------------------------------
+            # 找原始資料 index
+            # -------------------------------------------------
+
+            try:
+
+                matches = full_df[
+                    full_df["id"].astype(str)
+                    == str(row_id)
+                ].index
+
+            except Exception as e:
+
+                st.error(
+                    "❌ 搜尋 RFQ id 時發生錯誤"
+                )
+
+                st.exception(e)
+
+                continue
 
 
             if len(matches) == 0:
+
+                st.warning(
+                    f"⚠️ 找不到 RFQ："
+                    f"{row.get('RFQ_ID', '未知')}"
+                )
+
                 continue
 
 
             real_idx = matches[0]
 
 
+            # -------------------------------------------------
+            # 卡片
+            # -------------------------------------------------
+
             with st.container(
                 border=True
             ):
 
                 st.markdown(
-                    f"### 📌 {row['title']}"
+                    f"### 📌 {row.get('title', '未命名')}"
                 )
 
 
                 st.caption(
-                    f"🆔 RFQ：{row['RFQ_ID']}"
+                    f"🆔 RFQ："
+                    f"{row.get('RFQ_ID', '')}"
                 )
 
-                st.caption(
-                    f"📑 版本：{row['version']}"
-                )
 
                 st.caption(
-                    f"🏢 部門：{row['department']}"
+                    f"📑 版本："
+                    f"{row.get('version', '')}"
                 )
 
-                st.caption(
-                    f"🏭 客戶：{row['customer']}"
-                )
 
                 st.caption(
-                    f"👤 負責人：{row['owner']}"
+                    f"🏢 部門："
+                    f"{row.get('department', '')}"
                 )
 
+
                 st.caption(
-                    f"📅 到期日：{row['due_time']}"
+                    f"🏭 客戶："
+                    f"{row.get('customer', '')}"
                 )
+
+
+                st.caption(
+                    f"👤 負責人："
+                    f"{row.get('owner', '')}"
+                )
+
+
+                st.caption(
+                    f"📅 到期日："
+                    f"{row.get('due_time', '待確認')}"
+                )
+
 
                 st.caption(
                     f"🔄 最後更新："
-                    f"{row['updated_time']}"
+                    f"{row.get('updated_time', '')}"
                 )
+
 
                 st.caption(
                     f"➡️ 下一步："
-                    f"{row['next_step']}"
+                    f"{row.get('next_step', '')}"
                 )
 
 
-                # =========================================
+                # =================================================
                 # 首次補問
-                # =========================================
+                # =================================================
 
-                if row["status"] in [
+                if row.get("status") in [
+
                     "新詢價",
                     "待補件"
+
                 ]:
 
                     st.info(
+
                         "📅 首次補問期限："
-                        f"{row['first_followup_due']}"
+                        f"{row.get('first_followup_due', '待確認')}"
+
                     )
 
 
-                # =========================================
-                # 報價條件
-                # =========================================
+                # =================================================
+                # 報價 Boolean
+                # =================================================
 
-                if row["status"] in [
+                approved = to_bool(
+
+                    row.get(
+                        "approved_quote",
+                        False
+                    )
+
+                )
+
+
+                sent = to_bool(
+
+                    row.get(
+                        "quote_sent",
+                        False
+                    )
+
+                )
+
+
+                if row.get("status") in [
+
                     "待核價",
                     "已報價",
                     "追蹤中"
+
                 ]:
 
                     q1, q2 = st.columns(2)
@@ -954,135 +1299,175 @@ with tab_board:
                     with q1:
 
                         approved = st.checkbox(
+
                             "✅ 核準報價",
-                            value=to_bool(
-                                row.get(
-                                    "approved_quote",
-                                    False
-                                )
-                            ),
+
+                            value=approved,
+
                             key=(
-                                f"approved_"
-                                f"{row['id']}"
+                                "approved_"
+                                f"{row_id}"
                             )
+
                         )
 
 
                     with q2:
 
                         sent = st.checkbox(
+
                             "📤 實際寄送",
-                            value=to_bool(
-                                row.get(
-                                    "quote_sent",
-                                    False
-                                )
-                            ),
+
+                            value=sent,
+
                             key=(
-                                f"sent_"
-                                f"{row['id']}"
+                                "sent_"
+                                f"{row_id}"
                             )
+
                         )
 
-                else:
 
-                    approved = to_bool(
-                        row.get(
-                            "approved_quote",
-                            False
-                        )
-                    )
-
-                    sent = to_bool(
-                        row.get(
-                            "quote_sent",
-                            False
-                        )
-                    )
-
-
-                # =========================================
+                # =================================================
                 # 狀態
-                # =========================================
+                # =================================================
 
-                current_status = row["status"]
+                current_status = str(
+
+                    row.get(
+                        "status",
+                        "新詢價"
+                    )
+
+                )
+
+
+                if current_status not in RFQ_STATUS:
+
+                    current_status = "新詢價"
 
 
                 new_status = st.selectbox(
+
                     "📂 更新狀態",
+
                     RFQ_STATUS,
+
                     index=RFQ_STATUS.index(
                         current_status
                     ),
+
                     key=(
-                        f"status_"
-                        f"{row['id']}"
+                        "status_"
+                        f"{row_id}"
                     )
+
                 )
 
 
                 evidence_update = st.text_area(
+
                     "📝 狀態變更依據",
+
                     value="",
+
                     placeholder=(
-                        "請輸入本次狀態變更的證據，"
-                        "例如：客戶 Email、工程確認、核價單..."
+                        "例如：客戶 Email、"
+                        "工程確認、核價單..."
                     ),
+
                     key=(
-                        f"evidence_"
-                        f"{row['id']}"
+                        "evidence_"
+                        f"{row_id}"
                     )
+
                 )
 
 
                 next_step_update = st.text_input(
+
                     "➡️ 下一步",
-                    value=row["next_step"],
+
+                    value=str(
+                        row.get(
+                            "next_step",
+                            ""
+                        )
+                    ),
+
                     key=(
-                        f"next_"
-                        f"{row['id']}"
+                        "next_"
+                        f"{row_id}"
                     )
+
                 )
 
 
                 exception_update = st.text_area(
+
                     "⚠️ 異常",
-                    value=row["exception"],
+
+                    value=str(
+                        row.get(
+                            "exception",
+                            ""
+                        )
+                    ),
+
                     key=(
-                        f"exception_"
-                        f"{row['id']}"
+                        "exception_"
+                        f"{row_id}"
                     )
+
                 )
 
 
-                # =========================================
-                # 更新
-                # =========================================
+                # =================================================
+                # 更新 RFQ
+                # =================================================
 
                 if st.button(
+
                     "💾 更新 RFQ",
+
                     key=(
-                        f"update_"
-                        f"{row['id']}"
+                        "update_"
+                        f"{row_id}"
                     )
+
                 ):
 
+                    # ---------------------------------------------
+                    # 建立暫存資料
+                    # ---------------------------------------------
+
                     temp_row = row.copy()
+
 
                     temp_row[
                         "approved_quote"
                     ] = bool(approved)
+
 
                     temp_row[
                         "quote_sent"
                     ] = bool(sent)
 
 
+                    # ---------------------------------------------
+                    # 驗證
+                    # ---------------------------------------------
+
                     valid, error_message = (
+
                         validate_status(
+
                             temp_row,
+
                             new_status
+
                         )
+
                     )
 
 
@@ -1097,111 +1482,162 @@ with tab_board:
                         old_status = current_status
 
 
-                        df.loc[
+                        # -----------------------------------------
+                        # 使用 full_df
+                        # -----------------------------------------
+
+                        full_df.loc[
                             real_idx,
                             "status"
                         ] = new_status
 
 
-                        df.loc[
+                        full_df.loc[
                             real_idx,
                             "next_step"
                         ] = (
+
                             next_step_update.strip()
+
                             if next_step_update.strip()
+
                             else STATUS_NEXT_STEP[
                                 new_status
                             ]
+
                         )
 
 
-                        # ---------------------------------
-                        # 關鍵：強制 Boolean
-                        # ---------------------------------
+                        # -----------------------------------------
+                        # Boolean
+                        # -----------------------------------------
 
-                        df.loc[
+                        full_df.loc[
                             real_idx,
                             "approved_quote"
                         ] = bool(approved)
 
 
-                        df.loc[
+                        full_df.loc[
                             real_idx,
                             "quote_sent"
                         ] = bool(sent)
 
 
-                        df.loc[
-                            real_idx,
-                            "evidence"
-                        ] = (
-                            evidence_update.strip()
-                            if evidence_update.strip()
-                            else row["evidence"]
-                        )
+                        # -----------------------------------------
+                        # 證據
+                        # -----------------------------------------
 
+                        if evidence_update.strip():
 
-                        df.loc[
-                            real_idx,
-                            "exception"
-                        ] = (
-                            exception_update.strip()
-                            if exception_update.strip()
-                            else row["exception"]
-                        )
-
-
-                        df.loc[
-                            real_idx,
-                            "updated_time"
-                        ] = datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        )
-
-
-                        # ---------------------------------
-                        # 儲存前重新標準化 Boolean
-                        # ---------------------------------
-
-                        df = normalize_boolean_columns(
-                            df
-                        )
-
-
-                        conn.update(
-                            worksheet="Tasks",
-                            data=df
-                        )
-
-
-                        # ---------------------------------
-                        # StatusLog
-                        # ---------------------------------
-
-                        if old_status != new_status:
-
-                            save_status_log(
-                                row["RFQ_ID"],
-                                old_status,
-                                new_status,
-                                (
-                                    evidence_update.strip()
-                                    if evidence_update.strip()
-                                    else "待確認"
-                                )
+                            full_df.loc[
+                                real_idx,
+                                "evidence"
+                            ] = (
+                                evidence_update.strip()
                             )
 
 
-                        st.success(
-                            "✅ RFQ 已更新"
+                        # -----------------------------------------
+                        # 異常
+                        # -----------------------------------------
+
+                        if exception_update.strip():
+
+                            full_df.loc[
+                                real_idx,
+                                "exception"
+                            ] = (
+                                exception_update.strip()
+                            )
+
+
+                        # -----------------------------------------
+                        # 更新時間
+                        # -----------------------------------------
+
+                        full_df.loc[
+                            real_idx,
+                            "updated_time"
+                        ] = datetime.now().strftime(
+
+                            "%Y-%m-%d %H:%M:%S"
+
                         )
 
-                        st.rerun()
+
+                        # -----------------------------------------
+                        # Boolean 再次正規化
+                        # -----------------------------------------
+
+                        full_df = (
+                            normalize_boolean_columns(
+                                full_df
+                            )
+                        )
 
 
-                # =========================================
-                # 顯示證據
-                # =========================================
+                        # -----------------------------------------
+                        # 寫入 Google Sheets
+                        # -----------------------------------------
+
+                        try:
+
+                            conn.update(
+
+                                worksheet="Tasks",
+
+                                data=full_df
+
+                            )
+
+
+                            # -------------------------------------
+                            # Status Log
+                            # -------------------------------------
+
+                            if old_status != new_status:
+
+                                save_status_log(
+
+                                    row.get(
+                                        "RFQ_ID",
+                                        ""
+                                    ),
+
+                                    old_status,
+
+                                    new_status,
+
+                                    (
+                                        evidence_update.strip()
+                                        if evidence_update.strip()
+                                        else "待確認"
+                                    )
+
+                                )
+
+
+                            st.success(
+                                "✅ RFQ 已更新"
+                            )
+
+
+                            st.rerun()
+
+
+                        except Exception as e:
+
+                            st.error(
+                                "❌ RFQ 更新失敗"
+                            )
+
+                            st.exception(e)
+
+
+                # =================================================
+                # 查看證據
+                # =================================================
 
                 with st.expander(
                     "📎 查看證據／異常"
@@ -1212,37 +1648,50 @@ with tab_board:
                     )
 
                     st.write(
-                        row["evidence"]
+                        row.get(
+                            "evidence",
+                            "無"
+                        )
                     )
+
 
                     st.write(
                         "**異常：**"
                     )
 
                     st.write(
-                        row["exception"]
+                        row.get(
+                            "exception",
+                            "無"
+                        )
                     )
 
 
-                # =========================================
+                # =================================================
                 # 封存
-                # =========================================
+                # =================================================
 
-                if row["status"] == "結案":
+                if current_status == "結案":
 
                     if st.button(
+
                         "📦 封存",
+
                         key=(
-                            f"archive_"
-                            f"{row['id']}"
+                            "archive_"
+                            f"{row_id}"
                         )
+
                     ):
 
                         try:
 
                             data_df = conn.read(
+
                                 worksheet="Data",
+
                                 ttl=0
+
                             )
 
                         except Exception:
@@ -1250,114 +1699,164 @@ with tab_board:
                             data_df = pd.DataFrame()
 
 
+                        if data_df is None:
+
+                            data_df = pd.DataFrame()
+
+
                         if data_df.empty:
 
                             data_df = pd.DataFrame(
-                                columns=df.columns
+                                columns=full_df.columns
                             )
 
 
-                        row_data = df.loc[
+                        row_data = full_df.loc[
                             real_idx
-                        ]
+                        ].copy()
 
 
                         data_df = pd.concat(
+
                             [
+
                                 data_df,
+
                                 pd.DataFrame(
                                     [row_data]
                                 )
+
                             ],
+
                             ignore_index=True
+
+                        )
+
+
+                        try:
+
+                            conn.update(
+
+                                worksheet="Data",
+
+                                data=data_df
+
+                            )
+
+
+                            full_df = full_df.drop(
+                                index=real_idx
+                            )
+
+
+                            full_df = full_df.reset_index(
+                                drop=True
+                            )
+
+
+                            full_df = (
+                                normalize_boolean_columns(
+                                    full_df
+                                )
+                            )
+
+
+                            conn.update(
+
+                                worksheet="Tasks",
+
+                                data=full_df
+
+                            )
+
+
+                            st.success(
+                                "✅ RFQ 已封存"
+                            )
+
+
+                            st.rerun()
+
+
+                        except Exception as e:
+
+                            st.error(
+                                "❌ RFQ 封存失敗"
+                            )
+
+                            st.exception(e)
+
+
+                # =================================================
+                # 刪除
+                # =================================================
+
+                if st.button(
+
+                    "🗑️ 刪除",
+
+                    key=(
+                        "delete_"
+                        f"{row_id}"
+                    )
+
+                ):
+
+                    try:
+
+                        full_df = full_df.drop(
+                            index=real_idx
+                        )
+
+
+                        full_df = full_df.reset_index(
+                            drop=True
+                        )
+
+
+                        full_df = (
+                            normalize_boolean_columns(
+                                full_df
+                            )
                         )
 
 
                         conn.update(
-                            worksheet="Data",
-                            data=data_df
-                        )
 
-
-                        df.drop(
-                            real_idx,
-                            inplace=True
-                        )
-
-
-                        df.reset_index(
-                            drop=True,
-                            inplace=True
-                        )
-
-
-                        df = normalize_boolean_columns(
-                            df
-                        )
-
-
-                        conn.update(
                             worksheet="Tasks",
-                            data=df
+
+                            data=full_df
+
                         )
 
 
-                        st.success(
-                            "✅ RFQ 已封存"
+                        st.warning(
+                            "⚠️ RFQ 已刪除"
                         )
+
 
                         st.rerun()
 
 
-                # =========================================
-                # 刪除
-                # =========================================
+                    except Exception as e:
 
-                if st.button(
-                    "🗑️ 刪除",
-                    key=(
-                        f"delete_"
-                        f"{row['id']}"
-                    )
-                ):
+                        st.error(
+                            "❌ RFQ 刪除失敗"
+                        )
 
-                    df.drop(
-                        real_idx,
-                        inplace=True
-                    )
+                        st.exception(e)
 
 
-                    df.reset_index(
-                        drop=True,
-                        inplace=True
-                    )
-
-
-                    df = normalize_boolean_columns(
-                        df
-                    )
-
-
-                    conn.update(
-                        worksheet="Tasks",
-                        data=df
-                    )
-
-
-                    st.warning(
-                        "⚠️ RFQ 已刪除"
-                    )
-
-                    st.rerun()
-
-
-    # =============================================
-    # 看板顯示
-    # =============================================
+    # =========================================================
+    # 顯示 Kanban
+    # =========================================================
 
     for col, status in zip(
+
         board_cols,
+
         RFQ_STATUS
+
     ):
 
         with col:
@@ -1366,21 +1865,39 @@ with tab_board:
                 f"## {status}"
             )
 
+
+            # ---------------------------------------------
+            # 重要：
+            # task_df 是副本
+            # full_df 是完整資料
+            # ---------------------------------------------
+
+            task_df = df[
+                df["status"] == status
+            ].copy()
+
+
             render_tasks(
-                df[
-                    df["status"] == status
-                ],
-                status
+
+                task_df,
+
+                status,
+
+                df
+
             )
 
 
-# =========================================================
+# ################################################################
 # TAB 3：報價產生器
-# =========================================================
+# ################################################################
 
 with tab_quote:
 
-    st.subheader("💰 RFQ 報價產生器")
+    st.subheader(
+        "💰 RFQ 報價產生器"
+    )
+
 
     if df.empty:
 
@@ -1390,658 +1907,777 @@ with tab_quote:
 
     else:
 
-        rfq_options = df[
-            "RFQ_ID"
-        ].dropna().astype(str).tolist()
+        rfq_options = (
 
+            df["RFQ_ID"]
+            .dropna()
+            .astype(str)
+            .tolist()
 
-        selected_rfq = st.selectbox(
-            "選擇 RFQ",
-            rfq_options
         )
 
 
-        rfq_matches = df[
-            df["RFQ_ID"].astype(str)
-            == str(selected_rfq)
-        ]
+        if not rfq_options:
 
+            st.info(
+                "目前沒有有效 RFQ_ID。"
+            )
 
-        if not rfq_matches.empty:
+        else:
 
-            rfq = rfq_matches.iloc[0]
+            selected_rfq = st.selectbox(
 
+                "選擇 RFQ",
 
-            # =============================================
-            # RFQ 基本資料
-            # =============================================
+                rfq_options
 
-            st.markdown("### 📋 RFQ 基本資料")
-
-            info1, info2, info3, info4 = st.columns(4)
-
-
-            with info1:
-
-                st.metric(
-                    "RFQ",
-                    rfq["RFQ_ID"]
-                )
-
-
-            with info2:
-
-                st.metric(
-                    "客戶",
-                    rfq["customer"]
-                )
-
-
-            with info3:
-
-                st.metric(
-                    "產品",
-                    rfq["title"]
-                )
-
-
-            with info4:
-
-                st.metric(
-                    "目前狀態",
-                    rfq["status"]
-                )
-
-
-            st.divider()
-
-
-            # =============================================
-            # 報價表單
-            # =============================================
-
-            st.markdown(
-                "### 🧮 成本與報價計算"
             )
 
 
-            c1, c2, c3 = st.columns(3)
+            rfq_matches = df[
 
+                df["RFQ_ID"].astype(str)
+                == str(selected_rfq)
 
-            with c1:
+            ]
 
-                quote_version = st.text_input(
-                    "報價版本",
-                    value="V1"
-                )
 
-                quote_date = st.date_input(
-                    "報價日期",
-                    value=datetime.now().date()
-                )
+            if rfq_matches.empty:
 
-                quantity = st.number_input(
-                    "數量",
-                    min_value=1.0,
-                    value=1.0,
-                    step=1.0
-                )
-
-
-            with c2:
-
-                currency = st.selectbox(
-                    "幣別",
-                    [
-                        "TWD",
-                        "USD",
-                        "EUR",
-                        "JPY",
-                        "CNY"
-                    ]
-                )
-
-                unit = st.text_input(
-                    "單位",
-                    value="PCS"
-                )
-
-                drawing_version = st.text_input(
-                    "圖面版本",
-                    value=""
-                )
-
-
-            with c3:
-
-                payment_terms = st.text_input(
-                    "付款條件",
-                    placeholder="例如：T/T 30 days"
-                )
-
-                incoterms = st.text_input(
-                    "交易條件",
-                    placeholder="例如：FOB / CIF / EXW"
-                )
-
-                delivery = st.text_input(
-                    "交貨地",
-                    placeholder="待確認"
-                )
-
-
-            st.markdown("#### 💵 成本")
-
-            cost1, cost2, cost3, cost4 = st.columns(4)
-
-
-            with cost1:
-
-                material_cost = st.number_input(
-                    "材料成本",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0
-                )
-
-                processing_cost = st.number_input(
-                    "加工成本",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0
-                )
-
-
-            with cost2:
-
-                outsourcing_cost = st.number_input(
-                    "外包成本",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0
-                )
-
-                surface_cost = st.number_input(
-                    "表面處理",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0
-                )
-
-
-            with cost3:
-
-                packing_cost = st.number_input(
-                    "包裝成本",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0
-                )
-
-                transport_cost = st.number_input(
-                    "運輸成本",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0
-                )
-
-
-            with cost4:
-
-                other_cost = st.number_input(
-                    "其他成本",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0
-                )
-
-
-            # =============================================
-            # 計算
-            # =============================================
-
-            total_cost = (
-                material_cost
-                + processing_cost
-                + outsourcing_cost
-                + surface_cost
-                + packing_cost
-                + transport_cost
-                + other_cost
-            )
-
-
-            st.markdown("#### 📈 利潤與價格")
-
-            p1, p2, p3, p4 = st.columns(4)
-
-
-            with p1:
-
-                management_rate = st.number_input(
-                    "管理費 %",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=0.0,
-                    step=1.0
-                )
-
-
-            with p2:
-
-                profit_rate = st.number_input(
-                    "利潤率 %",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=20.0,
-                    step=1.0
-                )
-
-
-            with p3:
-
-                discount = st.number_input(
-                    "折扣",
-                    min_value=0.0,
-                    value=0.0,
-                    step=100.0
-                )
-
-
-            with p4:
-
-                tax_rate = st.number_input(
-                    "稅率 %",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=5.0,
-                    step=1.0
-                )
-
-
-            management_cost = (
-                total_cost
-                * management_rate
-                / 100
-            )
-
-
-            profit_base = (
-                total_cost
-                + management_cost
-            )
-
-
-            profit_amount = (
-                profit_base
-                * profit_rate
-                / 100
-            )
-
-
-            quote_total_before_discount = (
-                profit_base
-                + profit_amount
-            )
-
-
-            quote_total = max(
-                0,
-                quote_total_before_discount
-                - discount
-            )
-
-
-            if quantity > 0:
-
-                quote_unit_price = (
-                    quote_total
-                    / quantity
+                st.error(
+                    "❌ 找不到選擇的 RFQ"
                 )
 
             else:
 
-                quote_unit_price = 0
+                rfq = rfq_matches.iloc[0]
 
 
-            tax_amount = (
-                quote_total
-                * tax_rate
-                / 100
-            )
+                # =================================================
+                # RFQ 資料
+                # =================================================
 
-
-            grand_total = (
-                quote_total
-                + tax_amount
-            )
-
-
-            # =============================================
-            # 報價結果
-            # =============================================
-
-            st.divider()
-
-            st.markdown(
-                "### 📊 報價結果"
-            )
-
-
-            result1, result2, result3, result4 = (
-                st.columns(4)
-            )
-
-
-            with result1:
-
-                st.metric(
-                    "總成本",
-                    f"{currency} "
-                    f"{money(total_cost)}"
+                st.markdown(
+                    "### 📋 RFQ 基本資料"
                 )
 
 
-            with result2:
+                c1, c2, c3, c4 = st.columns(4)
 
-                st.metric(
-                    "毛利",
-                    f"{currency} "
-                    f"{money(profit_amount)}"
-                )
 
+                with c1:
 
-            with result3:
-
-                st.metric(
-                    "未稅報價",
-                    f"{currency} "
-                    f"{money(quote_total)}"
-                )
-
-
-            with result4:
-
-                st.metric(
-                    "含稅總額",
-                    f"{currency} "
-                    f"{money(grand_total)}"
-                )
-
-
-            gross_margin = 0
-
-            if quote_total > 0:
-
-                gross_margin = (
-                    quote_total
-                    - total_cost
-                ) / quote_total * 100
-
-
-            st.info(
-                f"📌 毛利率：{gross_margin:.2f}%  "
-                f"| 單價：{currency} "
-                f"{money(quote_unit_price)} / {unit}"
-            )
-
-
-            # =============================================
-            # 交期
-            # =============================================
-
-            lead_time = st.text_input(
-                "⏱️ 交期",
-                placeholder=(
-                    "例如：規格與訂單確認後 "
-                    "依生產排程評估"
-                )
-            )
-
-
-            validity = st.text_input(
-                "📅 報價有效期限",
-                value="30 days"
-            )
-
-
-            remark = st.text_area(
-                "📝 報價備註",
-                placeholder=(
-                    "請輸入客戶版報價需要顯示的備註"
-                )
-            )
-
-
-            # =============================================
-            # 產生報價
-            # =============================================
-
-            st.divider()
-
-            if st.button(
-                "💾 儲存報價草稿",
-                type="primary",
-                use_container_width=True
-            ):
-
-                # -----------------------------------------
-                # RFQ 基本防呆
-                # -----------------------------------------
-
-                if rfq["status"] not in [
-                    "待核價",
-                    "已報價",
-                    "追蹤中"
-                ]:
-
-                    st.warning(
-                        "⚠️ 目前 RFQ 狀態不是「待核價」。"
-                        "仍可儲存報價草稿，但正式報價前請確認工程評估完成。"
-                    )
-
-
-                quote_id = (
-                    f"QT-"
-                    f"{datetime.now().strftime('%Y%m%d')}-"
-                    f"{str(uuid.uuid4())[:6].upper()}"
-                )
-
-
-                quote_data = {
-
-                    "quote_id":
-                        quote_id,
-
-                    "RFQ_ID":
-                        rfq["RFQ_ID"],
-
-                    "quote_version":
-                        quote_version,
-
-                    "quote_date":
-                        quote_date.strftime(
-                            "%Y-%m-%d"
-                        ),
-
-                    "customer":
-                        rfq["customer"],
-
-                    "product":
-                        rfq["title"],
-
-                    "drawing_version":
-                        drawing_version
-                        if drawing_version.strip()
-                        else "待確認",
-
-                    "quantity":
-                        quantity,
-
-                    "currency":
-                        currency,
-
-                    "unit":
-                        unit,
-
-                    "material_cost":
-                        material_cost,
-
-                    "processing_cost":
-                        processing_cost,
-
-                    "outsourcing_cost":
-                        outsourcing_cost,
-
-                    "surface_cost":
-                        surface_cost,
-
-                    "packing_cost":
-                        packing_cost,
-
-                    "transport_cost":
-                        transport_cost,
-
-                    "other_cost":
-                        other_cost,
-
-                    "total_cost":
-                        total_cost,
-
-                    "management_rate":
-                        management_rate,
-
-                    "management_cost":
-                        management_cost,
-
-                    "profit_rate":
-                        profit_rate,
-
-                    "profit_amount":
-                        profit_amount,
-
-                    "discount":
-                        discount,
-
-                    "quote_unit_price":
-                        quote_unit_price,
-
-                    "quote_total":
-                        quote_total,
-
-                    "tax_rate":
-                        tax_rate,
-
-                    "tax_amount":
-                        tax_amount,
-
-                    "grand_total":
-                        grand_total,
-
-                    "payment_terms":
-                        payment_terms,
-
-                    "incoterms":
-                        incoterms,
-
-                    "delivery":
-                        delivery
-                        if delivery.strip()
-                        else "待確認",
-
-                    "lead_time":
-                        lead_time
-                        if lead_time.strip()
-                        else "待確認",
-
-                    "validity":
-                        validity,
-
-                    "remark":
-                        remark,
-
-                    "approved":
-                        False,
-
-                    "approved_time":
-                        "",
-
-                    "sent":
-                        False,
-
-                    "sent_time":
-                        "",
-
-                    "created_time":
-                        datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
+                    st.metric(
+                        "RFQ",
+                        str(
+                            rfq.get(
+                                "RFQ_ID",
+                                ""
+                            )
                         )
-                }
-
-
-                try:
-
-                    quote_df = conn.read(
-                        worksheet="Quotes",
-                        ttl=0
                     )
 
-                except Exception:
 
-                    quote_df = pd.DataFrame()
+                with c2:
+
+                    st.metric(
+                        "客戶",
+                        str(
+                            rfq.get(
+                                "customer",
+                                ""
+                            )
+                        )
+                    )
 
 
-                if quote_df.empty:
+                with c3:
 
-                    quote_df = pd.DataFrame(
-                        columns=QUOTE_COLUMNS
+                    st.metric(
+                        "詢價名稱",
+                        str(
+                            rfq.get(
+                                "title",
+                                ""
+                            )
+                        )
+                    )
+
+
+                with c4:
+
+                    st.metric(
+                        "目前狀態",
+                        str(
+                            rfq.get(
+                                "status",
+                                ""
+                            )
+                        )
+                    )
+
+
+                st.divider()
+
+
+                # =================================================
+                # 報價基本資料
+                # =================================================
+
+                st.markdown(
+                    "### 🧾 報價基本資料"
+                )
+
+
+                c1, c2, c3 = st.columns(3)
+
+
+                with c1:
+
+                    quote_version = st.text_input(
+                        "報價版本",
+                        value="V1"
+                    )
+
+
+                    quote_date = st.date_input(
+                        "報價日期",
+                        value=datetime.now().date()
+                    )
+
+
+                    quantity = st.number_input(
+                        "數量",
+                        min_value=1.0,
+                        value=1.0,
+                        step=1.0
+                    )
+
+
+                with c2:
+
+                    currency = st.selectbox(
+
+                        "幣別",
+
+                        [
+                            "TWD",
+                            "USD",
+                            "EUR",
+                            "JPY",
+                            "CNY"
+                        ]
+
+                    )
+
+
+                    unit = st.text_input(
+                        "單位",
+                        value="PCS"
+                    )
+
+
+                    drawing_version = st.text_input(
+                        "圖面版本"
+                    )
+
+
+                with c3:
+
+                    payment_terms = st.text_input(
+                        "付款條件"
+                    )
+
+
+                    incoterms = st.text_input(
+                        "交易條件"
+                    )
+
+
+                    delivery = st.text_input(
+                        "交貨地"
+                    )
+
+
+                # =================================================
+                # 成本
+                # =================================================
+
+                st.markdown(
+                    "### 💵 成本"
+                )
+
+
+                c1, c2, c3, c4 = st.columns(4)
+
+
+                with c1:
+
+                    material_cost = st.number_input(
+                        "材料成本",
+                        min_value=0.0,
+                        value=0.0,
+                        step=100.0
+                    )
+
+
+                    processing_cost = st.number_input(
+                        "加工成本",
+                        min_value=0.0,
+                        value=0.0,
+                        step=100.0
+                    )
+
+
+                with c2:
+
+                    outsourcing_cost = st.number_input(
+                        "外包成本",
+                        min_value=0.0,
+                        value=0.0,
+                        step=100.0
+                    )
+
+
+                    surface_cost = st.number_input(
+                        "表面處理",
+                        min_value=0.0,
+                        value=0.0,
+                        step=100.0
+                    )
+
+
+                with c3:
+
+                    packing_cost = st.number_input(
+                        "包裝成本",
+                        min_value=0.0,
+                        value=0.0,
+                        step=100.0
+                    )
+
+
+                    transport_cost = st.number_input(
+                        "運輸成本",
+                        min_value=0.0,
+                        value=0.0,
+                        step=100.0
+                    )
+
+
+                with c4:
+
+                    other_cost = st.number_input(
+                        "其他成本",
+                        min_value=0.0,
+                        value=0.0,
+                        step=100.0
+                    )
+
+
+                # =================================================
+                # 計算
+                # =================================================
+
+                total_cost = (
+
+                    material_cost
+                    + processing_cost
+                    + outsourcing_cost
+                    + surface_cost
+                    + packing_cost
+                    + transport_cost
+                    + other_cost
+
+                )
+
+
+                st.markdown(
+                    "### 📈 報價參數"
+                )
+
+
+                c1, c2, c3, c4 = st.columns(4)
+
+
+                with c1:
+
+                    management_rate = st.number_input(
+                        "管理費 %",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=0.0,
+                        step=1.0
+                    )
+
+
+                with c2:
+
+                    profit_rate = st.number_input(
+                        "利潤率 %",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=20.0,
+                        step=1.0
+                    )
+
+
+                with c3:
+
+                    discount = st.number_input(
+                        "折扣金額",
+                        min_value=0.0,
+                        value=0.0,
+                        step=100.0
+                    )
+
+
+                with c4:
+
+                    tax_rate = st.number_input(
+                        "稅率 %",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=5.0,
+                        step=1.0
+                    )
+
+
+                management_cost = (
+
+                    total_cost
+                    * management_rate
+                    / 100
+
+                )
+
+
+                profit_base = (
+
+                    total_cost
+                    + management_cost
+
+                )
+
+
+                profit_amount = (
+
+                    profit_base
+                    * profit_rate
+                    / 100
+
+                )
+
+
+                before_discount = (
+
+                    profit_base
+                    + profit_amount
+
+                )
+
+
+                quote_total = max(
+
+                    0,
+
+                    before_discount
+                    - discount
+
+                )
+
+
+                if quantity > 0:
+
+                    quote_unit_price = (
+
+                        quote_total
+                        / quantity
+
                     )
 
                 else:
 
-                    for col in QUOTE_COLUMNS:
-
-                        if col not in quote_df.columns:
-
-                            quote_df[col] = ""
+                    quote_unit_price = 0
 
 
-                quote_df = pd.concat(
-                    [
-                        quote_df,
-                        pd.DataFrame(
-                            [quote_data]
+                tax_amount = (
+
+                    quote_total
+                    * tax_rate
+                    / 100
+
+                )
+
+
+                grand_total = (
+
+                    quote_total
+                    + tax_amount
+
+                )
+
+
+                gross_margin = 0
+
+
+                if quote_total > 0:
+
+                    gross_margin = (
+
+                        quote_total
+                        - total_cost
+
+                    ) / quote_total * 100
+
+
+                # =================================================
+                # 報價結果
+                # =================================================
+
+                st.divider()
+
+
+                st.markdown(
+                    "### 📊 報價結果"
+                )
+
+
+                c1, c2, c3, c4 = st.columns(4)
+
+
+                with c1:
+
+                    st.metric(
+                        "總成本",
+                        f"{currency} "
+                        f"{money(total_cost)}"
+                    )
+
+
+                with c2:
+
+                    st.metric(
+                        "利潤",
+                        f"{currency} "
+                        f"{money(profit_amount)}"
+                    )
+
+
+                with c3:
+
+                    st.metric(
+                        "未稅報價",
+                        f"{currency} "
+                        f"{money(quote_total)}"
+                    )
+
+
+                with c4:
+
+                    st.metric(
+                        "含稅總額",
+                        f"{currency} "
+                        f"{money(grand_total)}"
+                    )
+
+
+                st.info(
+
+                    f"📌 毛利率："
+                    f"{gross_margin:.2f}%"
+                    f"　|　單價："
+                    f"{currency} "
+                    f"{money(quote_unit_price)}"
+                    f" / {unit}"
+
+                )
+
+
+                # =================================================
+                # 交期
+                # =================================================
+
+                lead_time = st.text_input(
+                    "⏱️ 交期",
+                    placeholder="例如：確認訂單後 30 天"
+                )
+
+
+                validity = st.text_input(
+                    "📅 報價有效期限",
+                    value="30 days"
+                )
+
+
+                remark = st.text_area(
+                    "📝 報價備註"
+                )
+
+
+                # =================================================
+                # 儲存報價
+                # =================================================
+
+                if st.button(
+
+                    "💾 儲存報價草稿",
+
+                    type="primary",
+
+                    use_container_width=True
+
+                ):
+
+                    quote_id = (
+
+                        "QT-"
+                        f"{datetime.now().strftime('%Y%m%d')}-"
+                        f"{str(uuid.uuid4())[:6].upper()}"
+
+                    )
+
+
+                    quote_data = {
+
+                        "quote_id":
+                            quote_id,
+
+                        "RFQ_ID":
+                            rfq["RFQ_ID"],
+
+                        "quote_version":
+                            quote_version,
+
+                        "quote_date":
+                            quote_date.strftime(
+                                "%Y-%m-%d"
+                            ),
+
+                        "customer":
+                            rfq.get(
+                                "customer",
+                                ""
+                            ),
+
+                        "product":
+                            rfq.get(
+                                "title",
+                                ""
+                            ),
+
+                        "drawing_version":
+                            (
+                                drawing_version.strip()
+                                if drawing_version.strip()
+                                else "待確認"
+                            ),
+
+                        "quantity":
+                            quantity,
+
+                        "currency":
+                            currency,
+
+                        "unit":
+                            unit,
+
+                        "material_cost":
+                            material_cost,
+
+                        "processing_cost":
+                            processing_cost,
+
+                        "outsourcing_cost":
+                            outsourcing_cost,
+
+                        "surface_cost":
+                            surface_cost,
+
+                        "packing_cost":
+                            packing_cost,
+
+                        "transport_cost":
+                            transport_cost,
+
+                        "other_cost":
+                            other_cost,
+
+                        "total_cost":
+                            total_cost,
+
+                        "management_rate":
+                            management_rate,
+
+                        "management_cost":
+                            management_cost,
+
+                        "profit_rate":
+                            profit_rate,
+
+                        "profit_amount":
+                            profit_amount,
+
+                        "discount":
+                            discount,
+
+                        "quote_unit_price":
+                            quote_unit_price,
+
+                        "quote_total":
+                            quote_total,
+
+                        "tax_rate":
+                            tax_rate,
+
+                        "tax_amount":
+                            tax_amount,
+
+                        "grand_total":
+                            grand_total,
+
+                        "payment_terms":
+                            payment_terms,
+
+                        "incoterms":
+                            incoterms,
+
+                        "delivery":
+                            (
+                                delivery.strip()
+                                if delivery.strip()
+                                else "待確認"
+                            ),
+
+                        "lead_time":
+                            (
+                                lead_time.strip()
+                                if lead_time.strip()
+                                else "待確認"
+                            ),
+
+                        "validity":
+                            validity,
+
+                        "remark":
+                            remark,
+
+                        "approved":
+                            False,
+
+                        "approved_time":
+                            "",
+
+                        "sent":
+                            False,
+
+                        "sent_time":
+                            "",
+
+                        "created_time":
+                            datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
+
+                    }
+
+
+                    try:
+
+                        quote_df = conn.read(
+
+                            worksheet="Quotes",
+
+                            ttl=0
+
                         )
-                    ],
-                    ignore_index=True
+
+                    except Exception:
+
+                        quote_df = pd.DataFrame()
+
+
+                    if quote_df is None:
+
+                        quote_df = pd.DataFrame()
+
+
+                    if quote_df.empty:
+
+                        quote_df = pd.DataFrame(
+                            columns=QUOTE_COLUMNS
+                        )
+
+                    else:
+
+                        for col in QUOTE_COLUMNS:
+
+                            if col not in quote_df.columns:
+
+                                quote_df[col] = ""
+
+
+                    quote_df = pd.concat(
+
+                        [
+
+                            quote_df,
+
+                            pd.DataFrame(
+                                [quote_data]
+                            )
+
+                        ],
+
+                        ignore_index=True
+
+                    )
+
+
+                    try:
+
+                        conn.update(
+
+                            worksheet="Quotes",
+
+                            data=quote_df
+
+                        )
+
+
+                        st.success(
+
+                            f"✅ 報價草稿建立成功："
+                            f"{quote_id}"
+
+                        )
+
+
+                    except Exception as e:
+
+                        st.error(
+                            "❌ 報價寫入 Google Sheets 失敗"
+                        )
+
+                        st.exception(e)
+
+
+                # =================================================
+                # 報價摘要
+                # =================================================
+
+                st.divider()
+
+
+                st.markdown(
+                    "### 📄 報價摘要"
                 )
 
 
-                conn.update(
-                    worksheet="Quotes",
-                    data=quote_df
-                )
+                summary_df = pd.DataFrame({
 
-
-                st.success(
-                    f"✅ 報價草稿已儲存：{quote_id}"
-                )
-
-
-            # =============================================
-            # 報價明細
-            # =============================================
-
-            st.divider()
-
-            st.markdown(
-                "### 📄 報價摘要"
-            )
-
-
-            summary_df = pd.DataFrame(
-                {
                     "項目": [
+
                         "RFQ",
                         "客戶",
                         "產品",
@@ -2057,100 +2693,170 @@ with tab_quote:
                         "單價",
                         "交期",
                         "有效期限"
+
                     ],
 
                     "內容": [
-                        rfq["RFQ_ID"],
-                        rfq["customer"],
-                        rfq["title"],
+
+                        rfq.get(
+                            "RFQ_ID",
+                            ""
+                        ),
+
+                        rfq.get(
+                            "customer",
+                            ""
+                        ),
+
+                        rfq.get(
+                            "title",
+                            ""
+                        ),
+
                         quantity,
+
                         currency,
-                        money(total_cost),
-                        money(management_cost),
-                        money(profit_amount),
-                        money(discount),
-                        money(quote_total),
-                        money(tax_amount),
-                        money(grand_total),
-                        money(quote_unit_price),
+
+                        money(
+                            total_cost
+                        ),
+
+                        money(
+                            management_cost
+                        ),
+
+                        money(
+                            profit_amount
+                        ),
+
+                        money(
+                            discount
+                        ),
+
+                        money(
+                            quote_total
+                        ),
+
+                        money(
+                            tax_amount
+                        ),
+
+                        money(
+                            grand_total
+                        ),
+
+                        money(
+                            quote_unit_price
+                        ),
+
                         lead_time
                         if lead_time.strip()
                         else "待確認",
+
                         validity
+
                     ]
-                }
-            )
+
+                })
 
 
-            st.dataframe(
-                summary_df,
-                use_container_width=True,
-                hide_index=True
-            )
+                st.dataframe(
 
+                    summary_df,
 
-            # =============================================
-            # Excel 下載
-            # =============================================
+                    use_container_width=True,
 
-            export_df = pd.DataFrame(
-                [quote_data]
-            )
+                    hide_index=True
 
-
-            excel_buffer = io.BytesIO()
-
-
-            try:
-
-                with pd.ExcelWriter(
-                    excel_buffer,
-                    engine="openpyxl"
-                ) as writer:
-
-                    export_df.to_excel(
-                        writer,
-                        index=False,
-                        sheet_name="Quotation"
-                    )
-
-
-                st.download_button(
-                    "📊 下載 Excel 報價明細",
-                    data=excel_buffer.getvalue(),
-                    file_name=(
-                        f"{quote_id}.xlsx"
-                    ),
-                    mime=(
-                        "application/vnd.openxmlformats-"
-                        "officedocument.spreadsheetml.sheet"
-                    )
-                )
-
-            except Exception as e:
-
-                st.warning(
-                    f"Excel 產生失敗：{e}"
                 )
 
 
-# =========================================================
-# TAB 4：StatusLog
-# =========================================================
+                # =================================================
+                # Excel
+                # =================================================
+
+                export_df = pd.DataFrame(
+                    [quote_data]
+                ) if "quote_data" in locals() else pd.DataFrame()
+
+
+                if not export_df.empty:
+
+                    excel_buffer = io.BytesIO()
+
+
+                    try:
+
+                        with pd.ExcelWriter(
+
+                            excel_buffer,
+
+                            engine="openpyxl"
+
+                        ) as writer:
+
+                            export_df.to_excel(
+
+                                writer,
+
+                                index=False,
+
+                                sheet_name="Quotation"
+
+                            )
+
+
+                        st.download_button(
+
+                            "📊 下載 Excel 報價",
+
+                            data=excel_buffer.getvalue(),
+
+                            file_name=(
+                                f"{quote_id}.xlsx"
+                            ),
+
+                            mime=(
+                                "application/vnd.openxmlformats-"
+                                "officedocument.spreadsheetml.sheet"
+                            )
+
+                        )
+
+                    except Exception as e:
+
+                        st.warning(
+                            f"Excel 產生失敗：{e}"
+                        )
+
+
+# ################################################################
+# TAB 4：STATUS LOG
+# ################################################################
 
 with tab_log:
 
-    st.subheader("📜 RFQ 狀態異動紀錄")
+    st.subheader(
+        "📜 RFQ 狀態異動紀錄"
+    )
 
 
     try:
 
         log_df = conn.read(
+
             worksheet="StatusLog",
+
             ttl=0
+
         )
 
     except Exception:
+
+        log_df = pd.DataFrame()
+
+
+    if log_df is None:
 
         log_df = pd.DataFrame()
 
@@ -2163,11 +2869,23 @@ with tab_log:
 
     else:
 
-        st.dataframe(
-            log_df.sort_values(
+        if "change_time" in log_df.columns:
+
+            log_df = log_df.sort_values(
+
                 by="change_time",
+
                 ascending=False
-            ),
+
+            )
+
+
+        st.dataframe(
+
+            log_df,
+
             use_container_width=True,
+
             hide_index=True
+
         )
