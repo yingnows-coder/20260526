@@ -2166,6 +2166,18 @@ with tab_board:
 
 with tab_quote:
 
+    # =========================================================
+    # 報價單語言版本
+    # =========================================================
+    quote_language = st.radio(
+        "🌐 報價單版本",
+        ["中文版", "English Version"],
+        horizontal=True,
+        key="quote_language_selector",
+    )
+    quote_is_en = quote_language == "English Version"
+
+
     st.subheader("💰 RFQ 報價產生器")
     st.caption("簡化流程：RFQ → 商務條件 → 報價品項 → 規格 → 備註 → 正式報價")
 
@@ -2317,7 +2329,11 @@ with tab_quote:
                         step=1,
                         key="quote_delivery_days"
                     )
-                    lead_choice = f"收到訂金後 {int(delivery_days)} 天"
+                    lead_choice = (
+                        f"Within {int(delivery_days)} days after receipt of deposit"
+                        if quote_is_en
+                        else f"收到訂金後 {int(delivery_days)} 天"
+                    )
                     lead_custom = ""
                 validity = validity_custom.strip() if validity_choice == "自訂" else validity_choice
                 payment_terms = payment_custom.strip() if payment_choice == "自訂" else payment_choice
@@ -2328,6 +2344,26 @@ with tab_quote:
                 payment_terms = payment_terms or "待確認"
                 trade_terms = trade_terms or "待確認"
                 lead_time = lead_time or "待確認"
+
+                # 英文版標準商務條件
+                if quote_is_en:
+                    validity_map_en = {
+                        "一個月": "One month",
+                        "30天": "30 days",
+                        "60天": "60 days",
+                        "90天": "90 days",
+                        "待確認": "To be confirmed",
+                    }
+                    payment_map_en = {
+                        "訂金30%，出貨前付清70%": "30% deposit, 70% balance before shipment",
+                        "訂金50%，出貨前付清50%": "50% deposit, 50% balance before shipment",
+                        "月結30天": "Net 30 days",
+                        "月結60天": "Net 60 days",
+                        "待確認": "To be confirmed",
+                    }
+                    validity = validity_map_en.get(validity, validity)
+                    payment_terms = payment_map_en.get(payment_terms, payment_terms)
+                    trade_terms = "To be confirmed" if trade_terms == "待確認" else trade_terms
 
                 # -----------------------------------------------------
                 # 3. 多品項
@@ -2457,6 +2493,16 @@ with tab_quote:
                 if other_note.strip():
                     notes.append(other_note.strip())
 
+                if quote_is_en:
+                    note_map_en = {
+                        "以上報價不含5%營業稅": "The above quotation excludes 5% VAT.",
+                        "以上報價不含包裝": "The above quotation excludes packing charges.",
+                        "運費另計": "Freight charges are not included.",
+                        "安裝費另計": "Installation charges are not included.",
+                        "試車費另計": "Commissioning charges are not included.",
+                    }
+                    notes = [note_map_en.get(note, note) for note in notes]
+
                 # -----------------------------------------------------
                 # 生成正式報價
                 # -----------------------------------------------------
@@ -2485,6 +2531,7 @@ with tab_quote:
 
                         generated_quote = {
                             "quote_id": quote_id,
+                            "quote_language": quote_language,
                             "RFQ_ID": selected_rfq,
                             "quote_version": "V1",
                             "quote_date": quote_date.strftime("%Y/%m/%d"),
@@ -2580,52 +2627,59 @@ with tab_quote:
                 generated = st.session_state.generated_quote
 
                 if generated:
+                    generated_language = generated.get("quote_language", "中文版")
+                    generated_is_en = generated_language == "English Version"
+
                     st.divider()
-                    st.markdown("## 📄 報價單預覽")
-                    st.markdown("### 震唯機械股份有限公司")
-                    st.caption("報 價 單 / QUOTATION")
+                    st.markdown("## 📄 " + ("Quotation Preview" if generated_is_en else "報價單預覽"))
+                    st.markdown("### " + ("JENN-WEI MACHINERY CO., LTD." if generated_is_en else "震唯機械股份有限公司"))
+                    st.caption("QUOTATION" if generated_is_en else "報 價 單")
 
                     h1, h2 = st.columns(2)
                     with h1:
-                        st.write(f"**客戶名稱：** {generated['customer']}")
+                        st.write(f"**{'Customer' if generated_is_en else '客戶名稱'}：** {generated['customer']}")
                         st.write(f"**Attn：** {generated['contact_person']}")
-                        st.write(f"**有效期限：** {generated['validity']}")
-                        st.write(f"**付款條件：** {generated['payment_terms']}")
-                        st.write(f"**交貨日期：** {generated['lead_time']}")
+                        st.write(f"**{'Validity' if generated_is_en else '有效期限'}：** {generated['validity']}")
+                        st.write(f"**{'Payment Terms' if generated_is_en else '付款條件'}：** {generated['payment_terms']}")
+                        st.write(f"**{'Delivery' if generated_is_en else '交貨日期'}：** {generated['lead_time']}")
                     with h2:
                         st.write(f"**REF. NO.：** {generated['quote_id']}")
-                        st.write(f"**日期：** {generated['quote_date']}")
-                        st.write(f"**報價條件：** {generated['incoterms']}")
-                        st.write(f"**幣別：** {generated['currency']}")
+                        st.write(f"**{'Date' if generated_is_en else '日期'}：** {generated['quote_date']}")
+                        st.write(f"**{'Trade Terms' if generated_is_en else '報價條件'}：** {generated['incoterms']}")
+                        st.write(f"**{'Currency' if generated_is_en else '幣別'}：** {generated['currency']}")
 
                     preview_items = pd.DataFrame(generated["items"])
                     preview_items.insert(0, "NO.", range(1, len(preview_items) + 1))
                     preview_items["單價"] = preview_items["單價"].apply(money)
                     preview_items["金額"] = preview_items["金額"].apply(money)
 
+                    preview_display = preview_items[["NO.", "品名", "規格/說明", "數量", "單位", "單價", "金額"]].copy()
+                    if generated_is_en:
+                        preview_display.columns = ["NO.", "Description", "Specification / Description", "Qty", "Unit", "Unit Price", "Amount"]
+
                     st.dataframe(
-                        preview_items[["NO.", "品名", "規格/說明", "數量", "單位", "單價", "金額"]],
+                        preview_display,
                         use_container_width=True,
                         hide_index=True,
                     )
 
                     t1, t2, t3 = st.columns(3)
-                    t1.metric("未稅合計", f"{generated['currency']} {money(generated['quote_total'])}")
-                    t2.metric("營業稅", f"{generated['currency']} {money(generated['tax_amount'])}")
-                    t3.metric("總額", f"{generated['currency']} {money(generated['grand_total'])}")
+                    t1.metric("Subtotal" if generated_is_en else "未稅合計", f"{generated['currency']} {money(generated['quote_total'])}")
+                    t2.metric("VAT" if generated_is_en else "營業稅", f"{generated['currency']} {money(generated['tax_amount'])}")
+                    t3.metric("Total" if generated_is_en else "總額", f"{generated['currency']} {money(generated['grand_total'])}")
 
                     if generated["specification"]:
-                        st.markdown("### 產品規格")
+                        st.markdown("### Product Specifications" if generated_is_en else "### 產品規格")
                         for line in generated["specification"].splitlines():
                             if line.strip():
                                 st.write(f"• {line.strip()}")
 
                     if generated["notes"]:
-                        st.markdown("### 備註")
+                        st.markdown("### Remarks" if generated_is_en else "### 備註")
                         for note in generated["notes"]:
                             st.write(f"• {note}")
 
-                    st.markdown("**客戶確認：________________　核准：________　覆核：________　製單：________**")
+                    st.markdown("**Customer Acceptance: ________________　Approved by: ________　Checked by: ________　Prepared by: ________**" if generated_is_en else "**客戶確認：________________　核准：________　覆核：________　製單：________**")
 
                     # Excel：正式客戶版，不輸出內部成本/利潤
                     excel_buffer = io.BytesIO()
@@ -2663,8 +2717,8 @@ with tab_quote:
                         # =====================================================
                         # 公司表頭：B:G 合併並水平/垂直置中
                         company_header = [
-                            ("B1:G1", "B1", "震唯機械股份有限公司", 18, True),
-                            ("B2:G2", "B2", "台中市烏日區溪壩里溪南路一段680巷239號", 10, False),
+                            ("B1:G1", "B1", "JENN-WEI MACHINERY CO., LTD." if generated_is_en else "震唯機械股份有限公司", 18, True),
+                            ("B2:G2", "B2", "No. 239, Ln. 680, Sec. 1, Xinan Rd., Wuri Dist., Taichung City, Taiwan" if generated_is_en else "台中市烏日區溪壩里溪南路一段680巷239號", 10, False),
                             ("B3:G3", "B3", "TEL:886-4-23352368   FAX:886-4-23353880", 10, False),
                             ("B4:G4", "B4", "E-mail: L3352368@ms49.hinet.net", 10, False),
                             ("B5:G5", "B5", "Website: www.jennjwei.com", 10, False),
@@ -2687,7 +2741,7 @@ with tab_quote:
                         ws.row_dimensions[5].height = 18
 
                         ws.merge_cells("A7:G7")
-                        ws["A7"] = "報  價  單"
+                        ws["A7"] = "QUOTATION" if generated_is_en else "報  價  單"
                         ws["A7"].font = Font(size=18, bold=True)
                         ws["A7"].alignment = Alignment(horizontal="center", vertical="center")
                         ws.row_dimensions[7].height = 28
@@ -2695,7 +2749,7 @@ with tab_quote:
                         # =====================================================
                         # 客戶 / 商務條件
                         # =====================================================
-                        ws["A9"] = "客戶名稱"
+                        ws["A9"] = "Customer" if generated_is_en else "客戶名稱"
                         ws.merge_cells("B9:D9")
                         ws["B9"] = generated["customer"]
                         ws["E9"] = "REF. NO."
@@ -2705,22 +2759,22 @@ with tab_quote:
                         ws["A10"] = "Attn"
                         ws.merge_cells("B10:D10")
                         ws["B10"] = generated["contact_person"]
-                        ws["E10"] = "日期"
+                        ws["E10"] = "Date" if generated_is_en else "日期"
                         ws.merge_cells("F10:G10")
                         ws["F10"] = generated["quote_date"]
 
-                        ws["A11"] = "有效期限"
+                        ws["A11"] = "Validity" if generated_is_en else "有效期限"
                         ws.merge_cells("B11:D11")
                         ws["B11"] = generated["validity"]
-                        ws["E11"] = "報價條件"
+                        ws["E11"] = "Trade Terms" if generated_is_en else "報價條件"
                         ws.merge_cells("F11:G11")
                         ws["F11"] = generated["incoterms"]
 
-                        ws["A12"] = "付款條件"
+                        ws["A12"] = "Payment Terms" if generated_is_en else "付款條件"
                         ws.merge_cells("B12:G12")
                         ws["B12"] = generated["payment_terms"]
 
-                        ws["A13"] = "交貨日期"
+                        ws["A13"] = "Delivery" if generated_is_en else "交貨日期"
                         ws.merge_cells("B13:G13")
                         ws["B13"] = generated["lead_time"]
 
@@ -2731,7 +2785,7 @@ with tab_quote:
                         # =====================================================
                         # 報價品項
                         # =====================================================
-                        headers = ["NO.", "品名", "規格/說明", "數量", "單位", "單價", "金額"]
+                        headers = (["NO.", "Description", "Specification / Description", "Qty", "Unit", "Unit Price", "Amount"] if generated_is_en else ["NO.", "品名", "規格/說明", "數量", "單位", "單價", "金額"])
                         start_row = 15
                         for col_no, header in enumerate(headers, 1):
                             cell = ws.cell(start_row, col_no, header)
@@ -2752,7 +2806,7 @@ with tab_quote:
                             ws.cell(r, 7).number_format = '#,##0.00'
 
                         total_row = start_row + len(raw_items) + 1
-                        ws.cell(total_row, 6, "合計")
+                        ws.cell(total_row, 6, "Subtotal" if generated_is_en else "合計")
                         ws.cell(total_row, 6).font = Font(bold=True)
                         ws.cell(total_row, 7, generated["quote_total"])
                         ws.cell(total_row, 7).font = Font(bold=True)
@@ -2762,10 +2816,10 @@ with tab_quote:
                         if float(generated.get("tax_amount", 0)) > 0:
                             tax_row = total_row + 1
                             grand_row = total_row + 2
-                            ws.cell(tax_row, 6, "營業稅")
+                            ws.cell(tax_row, 6, "VAT" if generated_is_en else "營業稅")
                             ws.cell(tax_row, 7, generated["tax_amount"])
                             ws.cell(tax_row, 7).number_format = '#,##0.00'
-                            ws.cell(grand_row, 6, "含稅總額")
+                            ws.cell(grand_row, 6, "Total" if generated_is_en else "含稅總額")
                             ws.cell(grand_row, 6).font = Font(bold=True)
                             ws.cell(grand_row, 7, generated["grand_total"])
                             ws.cell(grand_row, 7).font = Font(bold=True)
@@ -2777,7 +2831,7 @@ with tab_quote:
                         current_row = table_end_row + 2
                         if generated["specification"]:
                             ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
-                            ws.cell(current_row, 1, "產品規格")
+                            ws.cell(current_row, 1, "Product Specifications" if generated_is_en else "產品規格")
                             ws.cell(current_row, 1).font = Font(bold=True, underline="single")
                             current_row += 1
                             for line in generated["specification"].splitlines():
@@ -2789,7 +2843,7 @@ with tab_quote:
 
                         current_row += 1
                         ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
-                        ws.cell(current_row, 1, "備註")
+                        ws.cell(current_row, 1, "Remarks" if generated_is_en else "備註")
                         ws.cell(current_row, 1).font = Font(bold=True, underline="single")
                         current_row += 1
                         for note in generated["notes"]:
@@ -2803,9 +2857,9 @@ with tab_quote:
                         # =====================================================
                         current_row += 2
                         ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=3)
-                        ws.cell(current_row, 1, "客戶確認：________________")
+                        ws.cell(current_row, 1, "Customer Acceptance: ________________" if generated_is_en else "客戶確認：________________")
                         ws.merge_cells(start_row=current_row, start_column=4, end_row=current_row, end_column=7)
-                        ws.cell(current_row, 4, "核准：________   覆核：________   製單：________")
+                        ws.cell(current_row, 4, "Approved by: ________   Checked by: ________   Prepared by: ________" if generated_is_en else "核准：________   覆核：________   製單：________")
 
                         # =====================================================
                         # 表格框線與欄寬
@@ -2836,9 +2890,9 @@ with tab_quote:
                         wb.save(excel_buffer)
 
                         st.download_button(
-                            "📊 下載正式 Excel 報價單",
+                            ("📊 Download Excel Quotation" if generated_is_en else "📊 下載正式 Excel 報價單"),
                             data=excel_buffer.getvalue(),
-                            file_name=f"{generated['quote_id']}.xlsx",
+                            file_name=f"{generated['quote_id']}_{'EN' if generated_is_en else 'CN'}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True,
                             key="download_simple_quote_excel",
@@ -2970,9 +3024,9 @@ with tab_quote:
                                 logo_flowable = ""
 
                         company_info = [
-                            Paragraph("震唯機械股份有限公司", styles["company"]),
+                            Paragraph("JENN-WEI MACHINERY CO., LTD." if generated_is_en else "震唯機械股份有限公司", styles["company"]),
                             Paragraph(
-                                "台中市烏日區溪壩里溪南路一段680巷239號",
+                                "No. 239, Ln. 680, Sec. 1, Xinan Rd., Wuri Dist., Taichung City, Taiwan" if generated_is_en else "台中市烏日區溪壩里溪南路一段680巷239號",
                                 styles["company_info"],
                             ),
                             Paragraph(
@@ -3011,14 +3065,14 @@ with tab_quote:
                         )
                         story.append(header_table)
                         story.append(Spacer(1, 3 * mm))
-                        story.append(Paragraph("報　價　單", styles["title"]))
+                        story.append(Paragraph("QUOTATION" if generated_is_en else "報　價　單", styles["title"]))
 
                         # -------------------------------------------------
                         # 客戶 / 商務條件
                         # -------------------------------------------------
                         info_data = [
                             [
-                                Paragraph("客戶名稱", styles["normal"]),
+                                Paragraph("Customer" if generated_is_en else "客戶名稱", styles["normal"]),
                                 Paragraph(str(generated["customer"]), styles["normal"]),
                                 Paragraph("REF. NO.", styles["normal"]),
                                 Paragraph(str(generated["quote_id"]), styles["normal"]),
@@ -3026,23 +3080,23 @@ with tab_quote:
                             [
                                 Paragraph("Attn", styles["normal"]),
                                 Paragraph(str(generated["contact_person"]), styles["normal"]),
-                                Paragraph("日期", styles["normal"]),
+                                Paragraph("Date" if generated_is_en else "日期", styles["normal"]),
                                 Paragraph(str(generated["quote_date"]), styles["normal"]),
                             ],
                             [
-                                Paragraph("有效期限", styles["normal"]),
+                                Paragraph("Validity" if generated_is_en else "有效期限", styles["normal"]),
                                 Paragraph(str(generated["validity"]), styles["normal"]),
-                                Paragraph("報價條件", styles["normal"]),
+                                Paragraph("Trade Terms" if generated_is_en else "報價條件", styles["normal"]),
                                 Paragraph(str(generated["incoterms"]), styles["normal"]),
                             ],
                             [
-                                Paragraph("付款條件", styles["normal"]),
+                                Paragraph("Payment Terms" if generated_is_en else "付款條件", styles["normal"]),
                                 Paragraph(str(generated["payment_terms"]), styles["normal"]),
                                 "",
                                 "",
                             ],
                             [
-                                Paragraph("交貨日期", styles["normal"]),
+                                Paragraph("Delivery" if generated_is_en else "交貨日期", styles["normal"]),
                                 Paragraph(str(generated["lead_time"]), styles["normal"]),
                                 "",
                                 "",
@@ -3075,12 +3129,12 @@ with tab_quote:
                         # -------------------------------------------------
                         pdf_item_rows = [[
                             Paragraph("NO.", styles["center"]),
-                            Paragraph("品名", styles["center"]),
-                            Paragraph("規格/說明", styles["center"]),
-                            Paragraph("數量", styles["center"]),
-                            Paragraph("單位", styles["center"]),
-                            Paragraph("單價", styles["center"]),
-                            Paragraph("金額", styles["center"]),
+                            Paragraph("Description" if generated_is_en else "品名", styles["center"]),
+                            Paragraph("Specification / Description" if generated_is_en else "規格/說明", styles["center"]),
+                            Paragraph("Qty" if generated_is_en else "數量", styles["center"]),
+                            Paragraph("Unit" if generated_is_en else "單位", styles["center"]),
+                            Paragraph("Unit Price" if generated_is_en else "單價", styles["center"]),
+                            Paragraph("Amount" if generated_is_en else "金額", styles["center"]),
                         ]]
 
                         for i, item in enumerate(generated["items"], start=1):
@@ -3099,19 +3153,19 @@ with tab_quote:
 
                         pdf_item_rows.append([
                             "", "", "", "", "",
-                            Paragraph("合計", styles["right"]),
+                            Paragraph("Subtotal" if generated_is_en else "合計", styles["right"]),
                             Paragraph(f"{to_float(generated['quote_total']):,.2f}", styles["right"]),
                         ])
 
                         if to_float(generated.get("tax_amount", 0)) > 0:
                             pdf_item_rows.append([
                                 "", "", "", "", "",
-                                Paragraph("營業稅", styles["right"]),
+                                Paragraph("VAT" if generated_is_en else "營業稅", styles["right"]),
                                 Paragraph(f"{to_float(generated['tax_amount']):,.2f}", styles["right"]),
                             ])
                             pdf_item_rows.append([
                                 "", "", "", "", "",
-                                Paragraph("含稅總額", styles["right"]),
+                                Paragraph("Total" if generated_is_en else "含稅總額", styles["right"]),
                                 Paragraph(f"{to_float(generated['grand_total']):,.2f}", styles["right"]),
                             ])
 
@@ -3150,7 +3204,7 @@ with tab_quote:
                         # -------------------------------------------------
                         if generated.get("specification", "").strip():
                             spec_flowables = [
-                                Paragraph("<u>產品規格</u>", styles["section"])
+                                Paragraph("<u>Product Specifications</u>" if generated_is_en else "<u>產品規格</u>", styles["section"])
                             ]
                             for line in generated["specification"].splitlines():
                                 if line.strip():
@@ -3167,7 +3221,7 @@ with tab_quote:
                         # 備註
                         # -------------------------------------------------
                         note_flowables = [
-                            Paragraph("<u>備註</u>", styles["section"])
+                            Paragraph("<u>Remarks</u>" if generated_is_en else "<u>備註</u>", styles["section"])
                         ]
                         for note in generated.get("notes", []):
                             note_flowables.append(
@@ -3181,9 +3235,9 @@ with tab_quote:
                         # -------------------------------------------------
                         sign_table = Table(
                             [[
-                                Paragraph("客戶確認：________________", styles["normal"]),
+                                Paragraph("Customer Acceptance: ________________" if generated_is_en else "客戶確認：________________", styles["normal"]),
                                 Paragraph(
-                                    "核准：________　覆核：________　製單：________",
+                                    "Approved by: ________   Checked by: ________   Prepared by: ________" if generated_is_en else "核准：________　覆核：________　製單：________",
                                     styles["right"],
                                 ),
                             ]],
@@ -3202,9 +3256,9 @@ with tab_quote:
                         pdf_buffer.seek(0)
 
                         st.download_button(
-                            "📄 下載正式 PDF 報價單",
+                            ("📄 Download PDF Quotation" if generated_is_en else "📄 下載正式 PDF 報價單"),
                             data=pdf_buffer.getvalue(),
-                            file_name=f"{generated['quote_id']}.pdf",
+                            file_name=f"{generated['quote_id']}_{'EN' if generated_is_en else 'CN'}.pdf",
                             mime="application/pdf",
                             use_container_width=True,
                             key="download_simple_quote_pdf",
