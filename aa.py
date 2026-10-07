@@ -4,11 +4,13 @@ from streamlit_gsheets import GSheetsConnection
 from datetime import datetime, timedelta
 import uuid
 import io
+import os
 
 # Excel 匯出為選用功能；即使環境尚未安裝 openpyxl，主系統仍可正常執行
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side
+    from openpyxl.drawing.image import Image as XLImage
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
@@ -2377,39 +2379,106 @@ with tab_quote:
                         ws = wb.active
                         ws.title = "Quotation"
 
-                        ws.merge_cells("A1:G1")
-                        ws["A1"] = "震唯機械股份有限公司"
-                        ws["A1"].font = Font(size=18, bold=True)
-                        ws["A1"].alignment = Alignment(horizontal="center")
+                        # =====================================================
+                        # 公司 LOGO（jenn_wei_logo.png 與 aa.py 放同一層）
+                        # =====================================================
+                        logo_path = os.path.join(
+                            os.path.dirname(os.path.abspath(__file__)),
+                            "jenn_wei_logo.png",
+                        )
 
-                        ws.merge_cells("A2:G2")
-                        ws["A2"] = "報 價 單 / QUOTATION"
-                        ws["A2"].font = Font(size=16, bold=True)
-                        ws["A2"].alignment = Alignment(horizontal="center")
+                        if os.path.exists(logo_path):
+                            try:
+                                logo = XLImage(logo_path)
+                                # 保持接近原始 Logo 比例，避免變形
+                                logo.width = 115
+                                logo.height = 98
+                                ws.add_image(logo, "A1")
+                            except Exception as logo_error:
+                                # Logo 載入失敗不影響報價單本身產生
+                                print(f"Logo 載入失敗：{logo_error}")
 
-                        ws["A4"] = "客戶名稱"
-                        ws["B4"] = generated["customer"]
-                        ws["E4"] = "REF. NO."
-                        ws["F4"] = generated["quote_id"]
-                        ws["A5"] = "Attn"
-                        ws["B5"] = generated["contact_person"]
-                        ws["E5"] = "日期"
-                        ws["F5"] = generated["quote_date"]
-                        ws["A6"] = "有效期限"
-                        ws["B6"] = generated["validity"]
-                        ws["A7"] = "付款條件"
-                        ws["B7"] = generated["payment_terms"]
-                        ws["E7"] = "報價條件"
-                        ws["F7"] = generated["incoterms"]
-                        ws["A8"] = "交貨日期"
-                        ws["B8"] = generated["lead_time"]
+                        # =====================================================
+                        # 公司抬頭
+                        # =====================================================
+                        ws.merge_cells("C1:G1")
+                        ws["C1"] = "震唯機械股份有限公司"
+                        ws["C1"].font = Font(size=18, bold=True)
+                        ws["C1"].alignment = Alignment(horizontal="center", vertical="center")
 
+                        ws.merge_cells("C2:G2")
+                        ws["C2"] = "台中市烏日區溪壩里溪南路一段680巷239號"
+                        ws["C2"].alignment = Alignment(horizontal="center")
+
+                        ws.merge_cells("C3:G3")
+                        ws["C3"] = "TEL:886-4-23352368   FAX:886-4-23353880"
+                        ws["C3"].alignment = Alignment(horizontal="center")
+
+                        ws.merge_cells("C4:G4")
+                        ws["C4"] = "E-mail: L3352368@ms49.hinet.net"
+                        ws["C4"].alignment = Alignment(horizontal="center")
+
+                        ws.merge_cells("C5:G5")
+                        ws["C5"] = "Website: www.jennjwei.com"
+                        ws["C5"].alignment = Alignment(horizontal="center")
+
+                        ws.row_dimensions[1].height = 26
+                        ws.row_dimensions[2].height = 18
+                        ws.row_dimensions[3].height = 18
+                        ws.row_dimensions[4].height = 18
+                        ws.row_dimensions[5].height = 18
+
+                        ws.merge_cells("A7:G7")
+                        ws["A7"] = "報  價  單"
+                        ws["A7"].font = Font(size=18, bold=True)
+                        ws["A7"].alignment = Alignment(horizontal="center", vertical="center")
+                        ws.row_dimensions[7].height = 28
+
+                        # =====================================================
+                        # 客戶 / 商務條件
+                        # =====================================================
+                        ws["A9"] = "客戶名稱"
+                        ws.merge_cells("B9:D9")
+                        ws["B9"] = generated["customer"]
+                        ws["E9"] = "REF. NO."
+                        ws.merge_cells("F9:G9")
+                        ws["F9"] = generated["quote_id"]
+
+                        ws["A10"] = "Attn"
+                        ws.merge_cells("B10:D10")
+                        ws["B10"] = generated["contact_person"]
+                        ws["E10"] = "日期"
+                        ws.merge_cells("F10:G10")
+                        ws["F10"] = generated["quote_date"]
+
+                        ws["A11"] = "有效期限"
+                        ws.merge_cells("B11:D11")
+                        ws["B11"] = generated["validity"]
+                        ws["E11"] = "報價條件"
+                        ws.merge_cells("F11:G11")
+                        ws["F11"] = generated["incoterms"]
+
+                        ws["A12"] = "付款條件"
+                        ws.merge_cells("B12:G12")
+                        ws["B12"] = generated["payment_terms"]
+
+                        ws["A13"] = "交貨日期"
+                        ws.merge_cells("B13:G13")
+                        ws["B13"] = generated["lead_time"]
+
+                        for row_no in range(9, 14):
+                            for cell in ws[row_no]:
+                                cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+                        # =====================================================
+                        # 報價品項
+                        # =====================================================
                         headers = ["NO.", "品名", "規格/說明", "數量", "單位", "單價", "金額"]
-                        start_row = 10
+                        start_row = 15
                         for col_no, header in enumerate(headers, 1):
                             cell = ws.cell(start_row, col_no, header)
                             cell.font = Font(bold=True)
-                            cell.alignment = Alignment(horizontal="center")
+                            cell.alignment = Alignment(horizontal="center", vertical="center")
 
                         raw_items = pd.DataFrame(generated["items"])
                         for i, (_, item) in enumerate(raw_items.iterrows(), start=1):
@@ -2426,38 +2495,85 @@ with tab_quote:
 
                         total_row = start_row + len(raw_items) + 1
                         ws.cell(total_row, 6, "合計")
+                        ws.cell(total_row, 6).font = Font(bold=True)
                         ws.cell(total_row, 7, generated["quote_total"])
+                        ws.cell(total_row, 7).font = Font(bold=True)
                         ws.cell(total_row, 7).number_format = '#,##0.00'
 
-                        current_row = total_row + 2
+                        # 若選擇加稅，額外列出稅額與含稅總額
+                        if float(generated.get("tax_amount", 0)) > 0:
+                            tax_row = total_row + 1
+                            grand_row = total_row + 2
+                            ws.cell(tax_row, 6, "營業稅")
+                            ws.cell(tax_row, 7, generated["tax_amount"])
+                            ws.cell(tax_row, 7).number_format = '#,##0.00'
+                            ws.cell(grand_row, 6, "含稅總額")
+                            ws.cell(grand_row, 6).font = Font(bold=True)
+                            ws.cell(grand_row, 7, generated["grand_total"])
+                            ws.cell(grand_row, 7).font = Font(bold=True)
+                            ws.cell(grand_row, 7).number_format = '#,##0.00'
+                            table_end_row = grand_row
+                        else:
+                            table_end_row = total_row
+
+                        current_row = table_end_row + 2
                         if generated["specification"]:
+                            ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
                             ws.cell(current_row, 1, "產品規格")
-                            ws.cell(current_row, 1).font = Font(bold=True)
+                            ws.cell(current_row, 1).font = Font(bold=True, underline="single")
                             current_row += 1
                             for line in generated["specification"].splitlines():
                                 if line.strip():
                                     ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
                                     ws.cell(current_row, 1, f"• {line.strip()}")
+                                    ws.cell(current_row, 1).alignment = Alignment(wrap_text=True, vertical="top")
                                     current_row += 1
 
                         current_row += 1
+                        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
                         ws.cell(current_row, 1, "備註")
-                        ws.cell(current_row, 1).font = Font(bold=True)
+                        ws.cell(current_row, 1).font = Font(bold=True, underline="single")
                         current_row += 1
                         for note in generated["notes"]:
                             ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=7)
                             ws.cell(current_row, 1, f"• {note}")
+                            ws.cell(current_row, 1).alignment = Alignment(wrap_text=True)
                             current_row += 1
 
+                        # =====================================================
+                        # 簽核區
+                        # =====================================================
+                        current_row += 2
+                        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=3)
+                        ws.cell(current_row, 1, "客戶確認：________________")
+                        ws.merge_cells(start_row=current_row, start_column=4, end_row=current_row, end_column=7)
+                        ws.cell(current_row, 4, "核准：________   覆核：________   製單：________")
+
+                        # =====================================================
+                        # 表格框線與欄寬
+                        # =====================================================
                         thin = Side(style="thin")
-                        for row in ws.iter_rows(min_row=start_row, max_row=total_row, min_col=1, max_col=7):
+                        for row in ws.iter_rows(min_row=start_row, max_row=table_end_row, min_col=1, max_col=7):
                             for cell in row:
                                 cell.border = Border(top=thin, bottom=thin, left=thin, right=thin)
                                 cell.alignment = Alignment(vertical="center", wrap_text=True)
 
-                        widths = {"A": 7, "B": 28, "C": 28, "D": 10, "E": 10, "F": 16, "G": 16}
+                        widths = {"A": 7, "B": 25, "C": 28, "D": 10, "E": 10, "F": 16, "G": 16}
                         for col_letter, width in widths.items():
                             ws.column_dimensions[col_letter].width = width
+
+                        # A4 列印設定
+                        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+                        ws.page_setup.orientation = "portrait"
+                        ws.page_setup.fitToWidth = 1
+                        ws.page_setup.fitToHeight = 0
+                        ws.sheet_properties.pageSetUpPr.fitToPage = True
+                        ws.print_options.horizontalCentered = True
+                        ws.page_margins.left = 0.25
+                        ws.page_margins.right = 0.25
+                        ws.page_margins.top = 0.35
+                        ws.page_margins.bottom = 0.35
+                        ws.print_area = f"A1:G{current_row}"
 
                         wb.save(excel_buffer)
 
