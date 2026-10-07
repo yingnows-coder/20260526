@@ -195,6 +195,9 @@ RFQ_STATUS = [
     "待核價",
     "已報價",
     "追蹤中",
+    "成交生產",
+    "交貨",
+    "收款",
     "結案"
 
 ]
@@ -618,6 +621,11 @@ df["status"] = (
 # =========================================================
 
 df = normalize_boolean_columns(df)
+
+# 流程相容：案件進入成交生產 / 交貨 / 收款後，視為已成交
+if "sales_result" in df.columns and "status" in df.columns:
+    won_workflow_mask = df["status"].astype(str).isin(["成交生產", "交貨", "收款"])
+    df.loc[won_workflow_mask, "sales_result"] = "已成交"
 
 
 # =========================================================
@@ -5353,7 +5361,7 @@ with tab_intelligence:
                 == intel_country
             ].copy()
 
-    view["_quoted"] = view["status"].astype(str).isin(["已報價", "追蹤中", "結案"])
+    view["_quoted"] = view["status"].astype(str).isin(["已報價", "追蹤中", "成交生產", "交貨", "收款", "結案"])
     view["_won"] = view["sales_result"].eq("已成交")
     view["_lost"] = view["sales_result"].eq("未成交")
     view["_active"] = ~view["sales_result"].isin(["已成交", "未成交"])
