@@ -1290,6 +1290,41 @@ with tab_rfq:
 
 with tab_board:
 
+    # =========================================================
+    # RFQ 管理看板：業務下拉篩選
+    # =========================================================
+    board_owner_source = df.copy()
+
+    board_owner_options = sorted(
+        [
+            str(x).strip()
+            for x in board_owner_source.get("owner", pd.Series(dtype=str))
+                .dropna()
+                .astype(str)
+                .unique()
+            if str(x).strip()
+        ]
+    )
+
+    board_owner_filter = st.selectbox(
+        "👤 選擇業務",
+        ["全部業務"] + board_owner_options,
+        key="rfq_board_owner_filter"
+    )
+
+    if board_owner_filter == "全部業務":
+        board_df = board_owner_source.copy()
+    else:
+        board_df = board_owner_source[
+            board_owner_source["owner"].fillna("").astype(str).str.strip()
+            == board_owner_filter
+        ].copy()
+
+    st.caption(
+        f"目前顯示：{board_owner_filter}｜共 {len(board_df)} 筆 RFQ"
+    )
+
+
     st.subheader(
         "📊 RFQ 管理看板"
     )
