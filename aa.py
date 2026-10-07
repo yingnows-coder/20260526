@@ -488,7 +488,7 @@ try:
 
     df = conn.read(
         worksheet="Tasks",
-        ttl=0
+        ttl=GSHEETS_READ_TTL
     )
 
 except Exception as e:
@@ -643,7 +643,7 @@ def save_status_log(
 
         log_df = conn.read(
             worksheet="StatusLog",
-            ttl=0
+            ttl=GSHEETS_READ_TTL
         )
 
     except Exception:
@@ -1970,7 +1970,7 @@ with tab_board:
 
                                 worksheet="Data",
 
-                                ttl=0
+                                ttl=GSHEETS_READ_TTL
 
                             )
 
@@ -2623,7 +2623,7 @@ with tab_quote:
                         }
 
                         try:
-                            quote_df = conn.read(worksheet="Quotes", ttl=0)
+                            quote_df = conn.read(worksheet="Quotes", ttl=GSHEETS_READ_TTL)
                         except Exception:
                             quote_df = pd.DataFrame()
 
@@ -2641,6 +2641,7 @@ with tab_quote:
 
                         try:
                             conn.update(worksheet="Quotes", data=quote_df)
+                            clear_gsheets_cache()
                             st.success(f"✅ 正式報價單已建立：{quote_id}")
                         except Exception as e:
                             st.warning("⚠️ 報價單已在畫面產生，但 Quotes 工作表寫入失敗。")
@@ -3654,7 +3655,7 @@ with tab_kpi:
     try:
         kpi_quotes = conn.read(
             worksheet="Quotes",
-            ttl=0
+            ttl=GSHEETS_READ_TTL
         )
     except Exception:
         kpi_quotes = pd.DataFrame()
@@ -3688,7 +3689,7 @@ with tab_kpi:
     try:
         kpi_log = conn.read(
             worksheet="StatusLog",
-            ttl=0
+            ttl=GSHEETS_READ_TTL
         )
     except Exception:
         kpi_log = pd.DataFrame()
@@ -4722,6 +4723,7 @@ with tab_sales:
                 else ""
             )
             conn.update(worksheet="Tasks", data=df)
+            clear_gsheets_cache()
             st.success("成交資料已儲存。")
             st.rerun()
 
@@ -4772,7 +4774,7 @@ with tab_sales:
     )
 
     try:
-        sales_quotes = conn.read(worksheet="Quotes", ttl=0)
+        sales_quotes = conn.read(worksheet="Quotes", ttl=GSHEETS_READ_TTL)
     except Exception:
         sales_quotes = pd.DataFrame()
 
@@ -5683,7 +5685,7 @@ with tab_log:
 
             worksheet="StatusLog",
 
-            ttl=0
+            ttl=GSHEETS_READ_TTL
 
         )
 
