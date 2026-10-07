@@ -2618,6 +2618,372 @@ with tab_quote:
                     except Exception as e:
                         st.warning(f"Excel 報價單產生失敗：{e}")
 
+                    # =====================================================
+                    # PDF：正式客戶版
+                    # =====================================================
+                    pdf_buffer = io.BytesIO()
+
+                    try:
+                        from reportlab.lib import colors
+                        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+                        from reportlab.lib.pagesizes import A4
+                        from reportlab.lib.styles import ParagraphStyle
+                        from reportlab.lib.units import mm
+                        from reportlab.pdfbase import pdfmetrics
+                        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+                        from reportlab.platypus import (
+                            SimpleDocTemplate,
+                            Paragraph,
+                            Spacer,
+                            Table,
+                            TableStyle,
+                            Image as RLImage,
+                            KeepTogether,
+                        )
+
+                        # 繁體中文 CID Font，不需額外上傳字型檔
+                        pdfmetrics.registerFont(UnicodeCIDFont("MSung-Light"))
+                        PDF_FONT = "MSung-Light"
+
+                        doc = SimpleDocTemplate(
+                            pdf_buffer,
+                            pagesize=A4,
+                            rightMargin=10 * mm,
+                            leftMargin=10 * mm,
+                            topMargin=9 * mm,
+                            bottomMargin=10 * mm,
+                            title=f"Quotation {generated['quote_id']}",
+                            author="Jenn-Wei Machinery Co., Ltd.",
+                        )
+
+                        styles = {
+                            "company": ParagraphStyle(
+                                "company",
+                                fontName=PDF_FONT,
+                                fontSize=17,
+                                leading=21,
+                                alignment=TA_CENTER,
+                                spaceAfter=2,
+                            ),
+                            "company_info": ParagraphStyle(
+                                "company_info",
+                                fontName=PDF_FONT,
+                                fontSize=9,
+                                leading=12,
+                                alignment=TA_CENTER,
+                            ),
+                            "title": ParagraphStyle(
+                                "title",
+                                fontName=PDF_FONT,
+                                fontSize=18,
+                                leading=23,
+                                alignment=TA_CENTER,
+                                spaceBefore=5,
+                                spaceAfter=8,
+                            ),
+                            "normal": ParagraphStyle(
+                                "normal",
+                                fontName=PDF_FONT,
+                                fontSize=9.5,
+                                leading=13,
+                                alignment=TA_LEFT,
+                            ),
+                            "small": ParagraphStyle(
+                                "small",
+                                fontName=PDF_FONT,
+                                fontSize=8.5,
+                                leading=11,
+                                alignment=TA_LEFT,
+                            ),
+                            "section": ParagraphStyle(
+                                "section",
+                                fontName=PDF_FONT,
+                                fontSize=10,
+                                leading=14,
+                                alignment=TA_LEFT,
+                                spaceBefore=3,
+                                spaceAfter=3,
+                            ),
+                            "right": ParagraphStyle(
+                                "right",
+                                fontName=PDF_FONT,
+                                fontSize=9.5,
+                                leading=13,
+                                alignment=TA_RIGHT,
+                            ),
+                            "center": ParagraphStyle(
+                                "center",
+                                fontName=PDF_FONT,
+                                fontSize=9.5,
+                                leading=13,
+                                alignment=TA_CENTER,
+                            ),
+                        }
+
+                        story = []
+
+                        # -------------------------------------------------
+                        # PDF 公司表頭 + Logo
+                        # -------------------------------------------------
+                        pdf_logo_path = os.path.join(
+                            os.path.dirname(os.path.abspath(__file__)),
+                            "jenn_wei_logo.png",
+                        )
+
+                        logo_flowable = ""
+                        if os.path.exists(pdf_logo_path):
+                            try:
+                                logo_flowable = RLImage(
+                                    pdf_logo_path,
+                                    width=29 * mm,
+                                    height=25 * mm,
+                                )
+                            except Exception:
+                                logo_flowable = ""
+
+                        company_info = [
+                            Paragraph("震唯機械股份有限公司", styles["company"]),
+                            Paragraph(
+                                "台中市烏日區溪壩里溪南路一段680巷239號",
+                                styles["company_info"],
+                            ),
+                            Paragraph(
+                                "TEL: 886-4-23352368　FAX: 886-4-23353880",
+                                styles["company_info"],
+                            ),
+                            Paragraph(
+                                "E-mail: L3352368@ms49.hinet.net",
+                                styles["company_info"],
+                            ),
+                            Paragraph(
+                                "Website: www.jennjwei.com",
+                                styles["company_info"],
+                            ),
+                        ]
+
+                        header_table = Table(
+                            [[logo_flowable, company_info]],
+                            colWidths=[34 * mm, 142 * mm],
+                        )
+                        header_table.setStyle(
+                            TableStyle([
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                            ])
+                        )
+                        story.append(header_table)
+                        story.append(Spacer(1, 3 * mm))
+                        story.append(Paragraph("報　價　單", styles["title"]))
+
+                        # -------------------------------------------------
+                        # 客戶 / 商務條件
+                        # -------------------------------------------------
+                        info_data = [
+                            [
+                                Paragraph("客戶名稱", styles["normal"]),
+                                Paragraph(str(generated["customer"]), styles["normal"]),
+                                Paragraph("REF. NO.", styles["normal"]),
+                                Paragraph(str(generated["quote_id"]), styles["normal"]),
+                            ],
+                            [
+                                Paragraph("Attn", styles["normal"]),
+                                Paragraph(str(generated["contact_person"]), styles["normal"]),
+                                Paragraph("日期", styles["normal"]),
+                                Paragraph(str(generated["quote_date"]), styles["normal"]),
+                            ],
+                            [
+                                Paragraph("有效期限", styles["normal"]),
+                                Paragraph(str(generated["validity"]), styles["normal"]),
+                                Paragraph("報價條件", styles["normal"]),
+                                Paragraph(str(generated["incoterms"]), styles["normal"]),
+                            ],
+                            [
+                                Paragraph("付款條件", styles["normal"]),
+                                Paragraph(str(generated["payment_terms"]), styles["normal"]),
+                                "",
+                                "",
+                            ],
+                            [
+                                Paragraph("交貨日期", styles["normal"]),
+                                Paragraph(str(generated["lead_time"]), styles["normal"]),
+                                "",
+                                "",
+                            ],
+                        ]
+
+                        info_table = Table(
+                            info_data,
+                            colWidths=[20 * mm, 77 * mm, 20 * mm, 59 * mm],
+                        )
+                        info_table.setStyle(
+                            TableStyle([
+                                ("FONTNAME", (0, 0), (-1, -1), PDF_FONT),
+                                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("SPAN", (1, 3), (3, 3)),
+                                ("SPAN", (1, 4), (3, 4)),
+                                ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#BFBFBF")),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                            ])
+                        )
+                        story.append(info_table)
+                        story.append(Spacer(1, 4 * mm))
+
+                        # -------------------------------------------------
+                        # 報價品項
+                        # -------------------------------------------------
+                        pdf_item_rows = [[
+                            Paragraph("NO.", styles["center"]),
+                            Paragraph("品名", styles["center"]),
+                            Paragraph("規格/說明", styles["center"]),
+                            Paragraph("數量", styles["center"]),
+                            Paragraph("單位", styles["center"]),
+                            Paragraph("單價", styles["center"]),
+                            Paragraph("金額", styles["center"]),
+                        ]]
+
+                        for i, item in enumerate(generated["items"], start=1):
+                            qty = to_float(item.get("數量", 0))
+                            unit_price = to_float(item.get("單價", 0))
+                            amount = to_float(item.get("金額", qty * unit_price))
+                            pdf_item_rows.append([
+                                Paragraph(str(i), styles["center"]),
+                                Paragraph(str(item.get("品名", "")), styles["normal"]),
+                                Paragraph(str(item.get("規格/說明", "")), styles["small"]),
+                                Paragraph(f"{qty:g}", styles["center"]),
+                                Paragraph(str(item.get("單位", "")), styles["center"]),
+                                Paragraph(f"{unit_price:,.2f}", styles["right"]),
+                                Paragraph(f"{amount:,.2f}", styles["right"]),
+                            ])
+
+                        pdf_item_rows.append([
+                            "", "", "", "", "",
+                            Paragraph("合計", styles["right"]),
+                            Paragraph(f"{to_float(generated['quote_total']):,.2f}", styles["right"]),
+                        ])
+
+                        if to_float(generated.get("tax_amount", 0)) > 0:
+                            pdf_item_rows.append([
+                                "", "", "", "", "",
+                                Paragraph("營業稅", styles["right"]),
+                                Paragraph(f"{to_float(generated['tax_amount']):,.2f}", styles["right"]),
+                            ])
+                            pdf_item_rows.append([
+                                "", "", "", "", "",
+                                Paragraph("含稅總額", styles["right"]),
+                                Paragraph(f"{to_float(generated['grand_total']):,.2f}", styles["right"]),
+                            ])
+
+                        item_table = Table(
+                            pdf_item_rows,
+                            colWidths=[
+                                10 * mm,
+                                40 * mm,
+                                47 * mm,
+                                14 * mm,
+                                14 * mm,
+                                25 * mm,
+                                26 * mm,
+                            ],
+                            repeatRows=1,
+                        )
+                        item_table.setStyle(
+                            TableStyle([
+                                ("FONTNAME", (0, 0), (-1, -1), PDF_FONT),
+                                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
+                                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                            ])
+                        )
+                        story.append(item_table)
+                        story.append(Spacer(1, 4 * mm))
+
+                        # -------------------------------------------------
+                        # 規格
+                        # -------------------------------------------------
+                        if generated.get("specification", "").strip():
+                            spec_flowables = [
+                                Paragraph("<u>產品規格</u>", styles["section"])
+                            ]
+                            for line in generated["specification"].splitlines():
+                                if line.strip():
+                                    spec_flowables.append(
+                                        Paragraph(
+                                            f"• {line.strip()}",
+                                            styles["small"],
+                                        )
+                                    )
+                            story.append(KeepTogether(spec_flowables))
+                            story.append(Spacer(1, 2 * mm))
+
+                        # -------------------------------------------------
+                        # 備註
+                        # -------------------------------------------------
+                        note_flowables = [
+                            Paragraph("<u>備註</u>", styles["section"])
+                        ]
+                        for note in generated.get("notes", []):
+                            note_flowables.append(
+                                Paragraph(f"• {str(note)}", styles["small"])
+                            )
+                        story.append(KeepTogether(note_flowables))
+                        story.append(Spacer(1, 7 * mm))
+
+                        # -------------------------------------------------
+                        # 簽核
+                        # -------------------------------------------------
+                        sign_table = Table(
+                            [[
+                                Paragraph("客戶確認：________________", styles["normal"]),
+                                Paragraph(
+                                    "核准：________　覆核：________　製單：________",
+                                    styles["right"],
+                                ),
+                            ]],
+                            colWidths=[78 * mm, 98 * mm],
+                        )
+                        sign_table.setStyle(
+                            TableStyle([
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                            ])
+                        )
+                        story.append(sign_table)
+
+                        doc.build(story)
+                        pdf_buffer.seek(0)
+
+                        st.download_button(
+                            "📄 下載正式 PDF 報價單",
+                            data=pdf_buffer.getvalue(),
+                            file_name=f"{generated['quote_id']}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key="download_simple_quote_pdf",
+                        )
+
+                    except ImportError:
+                        st.warning(
+                            "PDF 報價單需要 reportlab。"
+                            "請在 requirements.txt 加入 reportlab 後重新部署。"
+                        )
+                    except Exception as e:
+                        st.warning(f"PDF 報價單產生失敗：{e}")
+
 
 # ################################################################
 # TAB 4：STATUS LOG
