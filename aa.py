@@ -488,7 +488,7 @@ try:
 
     df = conn.read(
         worksheet="Tasks",
-        ttl=GSHEETS_READ_TTL
+        ttl=300
     )
 
 except Exception as e:
@@ -643,7 +643,7 @@ def save_status_log(
 
         log_df = conn.read(
             worksheet="StatusLog",
-            ttl=GSHEETS_READ_TTL
+            ttl=300
         )
 
     except Exception:
@@ -1970,7 +1970,7 @@ with tab_board:
 
                                 worksheet="Data",
 
-                                ttl=GSHEETS_READ_TTL
+                                ttl=300
 
                             )
 
@@ -2623,7 +2623,7 @@ with tab_quote:
                         }
 
                         try:
-                            quote_df = conn.read(worksheet="Quotes", ttl=GSHEETS_READ_TTL)
+                            quote_df = conn.read(worksheet="Quotes", ttl=300)
                         except Exception:
                             quote_df = pd.DataFrame()
 
@@ -3655,7 +3655,7 @@ with tab_kpi:
     try:
         kpi_quotes = conn.read(
             worksheet="Quotes",
-            ttl=GSHEETS_READ_TTL
+            ttl=300
         )
     except Exception:
         kpi_quotes = pd.DataFrame()
@@ -3689,7 +3689,7 @@ with tab_kpi:
     try:
         kpi_log = conn.read(
             worksheet="StatusLog",
-            ttl=GSHEETS_READ_TTL
+            ttl=300
         )
     except Exception:
         kpi_log = pd.DataFrame()
@@ -4774,7 +4774,7 @@ with tab_sales:
     )
 
     try:
-        sales_quotes = conn.read(worksheet="Quotes", ttl=GSHEETS_READ_TTL)
+        sales_quotes = conn.read(worksheet="Quotes", ttl=300)
     except Exception:
         sales_quotes = pd.DataFrame()
 
@@ -5685,7 +5685,7 @@ with tab_log:
 
             worksheet="StatusLog",
 
-            ttl=GSHEETS_READ_TTL
+            ttl=300
 
         )
 
