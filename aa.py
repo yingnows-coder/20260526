@@ -5136,11 +5136,39 @@ with tab_sales:
 
 with tab_intelligence:
 
-    st.subheader("🎯 Sales Intelligence 銷售戰情室")
-    st.caption("詢價 → 報價 → 追蹤 → 成交的主管戰情頁；同步監控 Aging、逾期案件、市場機會與失單原因。")
+    # -------------------------------------------------------------
+    # Dashboard styling
+    # -------------------------------------------------------------
+    st.markdown(
+        """
+        <style>
+        .si-title {
+            background: linear-gradient(90deg,#3730a3,#4f46e5);
+            color:white; text-align:center; font-size:30px; font-weight:900;
+            padding:15px 18px; border-radius:8px; margin-bottom:14px;
+            letter-spacing:1px;
+        }
+        .si-card {
+            background:linear-gradient(135deg,#ffffff,#f8fafc);
+            border:1px solid #e2e8f0; border-radius:14px;
+            padding:15px 16px; min-height:118px;
+            box-shadow:0 2px 8px rgba(15,23,42,.08);
+        }
+        .si-card-title {font-size:15px;font-weight:800;color:#334155;}
+        .si-card-value {font-size:28px;font-weight:900;color:#3730a3;margin-top:6px;}
+        .si-card-sub {font-size:12px;color:#64748b;margin-top:5px;}
+        .si-panel-title {
+            background:linear-gradient(90deg,#3730a3,#4338ca);
+            color:white; padding:9px 14px; border-radius:7px 7px 0 0;
+            font-size:18px; font-weight:900; margin-top:6px;
+        }
+        </style>
+        <div class="si-title">🎯 Sales Intelligence 銷售戰情室</div>
+        """,
+        unsafe_allow_html=True
+    )
 
     intel = df.copy()
-
     intel_defaults = {
         "RFQ_ID": "", "customer": "", "title": "", "status": "",
         "owner": "", "created_time": "", "due_time": "",
@@ -5171,17 +5199,23 @@ with tab_intelligence:
     valid_created = intel["_created"].dropna()
     default_start = valid_created.min().date() if not valid_created.empty else today_intel.date()
 
-    f1, f2, f3 = st.columns([1, 1, 1.5])
+    # -------------------------------------------------------------
+    # Filters
+    # -------------------------------------------------------------
+    f1, f2, f3, f4 = st.columns([1,1,1.4,1.4])
     with f1:
-        intel_start = st.date_input("分析起始日", default_start, key="intel_start")
+        intel_start = st.date_input("起始日期", default_start, key="si_start")
     with f2:
-        intel_end = st.date_input("分析結束日", today_intel.date(), key="intel_end")
+        intel_end = st.date_input("結束日期", today_intel.date(), key="si_end")
     with f3:
         owner_opts = sorted([x for x in intel["owner"].dropna().astype(str).unique() if x.strip()])
-        intel_owners = st.multiselect("業務", owner_opts, default=owner_opts, key="intel_owner_filter")
+        intel_owners = st.multiselect("業務", owner_opts, default=owner_opts, key="si_owner")
+    with f4:
+        country_opts = sorted([x for x in intel["country"].unique() if x != "未分類"])
+        intel_countries = st.multiselect("國家", country_opts, default=country_opts, key="si_country")
 
     if intel_start > intel_end:
-        st.error("起始日不可晚於結束日。")
+        st.error("起始日期不可晚於結束日期。")
         view = intel.iloc[0:0].copy()
     else:
         s = pd.Timestamp(intel_start)
@@ -5189,56 +5223,96 @@ with tab_intelligence:
         view = intel[intel["_created"].between(s, e, inclusive="both")].copy()
         if intel_owners:
             view = view[view["owner"].astype(str).isin(intel_owners)]
+        if intel_countries:
+            view = view[view["country"].isin(intel_countries)]
 
-    # 已報價判斷：狀態已走到報價階段即視為已報價
     view["_quoted"] = view["status"].astype(str).isin(["已報價", "追蹤中", "結案"])
     view["_won"] = view["sales_result"].eq("已成交")
     view["_lost"] = view["sales_result"].eq("未成交")
     view["_active"] = ~view["sales_result"].isin(["已成交", "未成交"])
+    view["_won_amount"] = view["_deal_amount"].where(view["_won"], 0)
 
     total = len(view)
     quoted = int(view["_quoted"].sum())
     won = int(view["_won"].sum())
     active = int(view["_active"].sum())
-    deal_amount = float(view.loc[view["_won"], "_deal_amount"].sum())
+    lost_count = int(view["_lost"].sum())
+    deal_amount = float(view["_won_amount"].sum())
+    quote_rate = quoted / total * 100 if total else 0
     conversion = won / quoted * 100 if quoted else 0
 
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("詢價件數", f"{total} 件")
-    m2.metric("已報價", f"{quoted} 件")
-    m3.metric("進行中", f"{active} 件")
-    m4.metric("已成交", f"{won} 件")
-    m5.metric("成交率", f"{conversion:.1f}%")
-    m6.metric("成交金額", money(deal_amount))
+    # -------------------------------------------------------------
+    # KPI cards - reference-image style
+    # -------------------------------------------------------------
+    cards = [
+        ("📥", "詢價案件", f"{total:,} 件", "期間內 RFQ 總量"),
+        ("💰", "已報價案件", f"{quoted:,} 件", f"報價率 {quote_rate:.1f}%"),
+        ("🔄", "進行中案件", f"{active:,} 件", "目前 Pipeline"),
+        ("🏆", "已成交案件", f"{won:,} 件", f"成交率 {conversion:.1f}%"),
+        ("💵", "成交金額", money(deal_amount), "已成交案件金額"),
+        ("❌", "未成交案件", f"{lost_count:,} 件", "Lost Order"),
+    ]
+    card_cols = st.columns(6)
+    for c, (icon, title, value, sub) in zip(card_cols, cards):
+        with c:
+            st.markdown(
+                f"""
+                <div class="si-card">
+                    <div class="si-card-title">{icon} {title}</div>
+                    <div class="si-card-value">{value}</div>
+                    <div class="si-card-sub">{sub}</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-    st.divider()
-    left, right = st.columns(2)
+    st.write("")
 
-    with left:
-        st.markdown("### 🔻 Sales Funnel")
+    # -------------------------------------------------------------
+    # First dashboard row: Funnel / Aging / detail
+    # -------------------------------------------------------------
+    col_left, col_mid, col_right = st.columns([1.05,1.25,1.7])
+
+    with col_left:
+        st.markdown('<div class="si-panel-title">銷售漏斗與流程分布</div>', unsafe_allow_html=True)
+
         funnel = pd.DataFrame([
-            {"階段": s, "案件數": int((view["status"].astype(str) == s).sum())}
-            for s in RFQ_STATUS
+            {"階段": status_name, "案件數": int((view["status"].astype(str) == status_name).sum())}
+            for status_name in RFQ_STATUS
         ])
         funnel = funnel[funnel["案件數"] > 0]
+
         if funnel.empty:
             st.info("目前沒有流程資料。")
         else:
-            max_n = max(int(funnel["案件數"].max()), 1)
-            for _, r in funnel.iterrows():
-                width = max(12, int(r["案件數"] / max_n * 100))
-                st.markdown(
-                    f"""<div style="margin:7px 0">
-                    <div style="display:flex;justify-content:space-between;font-weight:700">
-                    <span>{r['階段']}</span><span>{int(r['案件數'])} 件</span></div>
-                    <div style="height:24px;background:#1f2937;border-radius:6px;overflow:hidden">
-                    <div style="width:{width}%;height:100%;background:linear-gradient(90deg,#2563eb,#38bdf8)"></div>
-                    </div></div>""",
-                    unsafe_allow_html=True
-                )
+            fig_funnel = px.bar(
+                funnel,
+                x="案件數",
+                y="階段",
+                orientation="h",
+                text="案件數",
+            )
+            fig_funnel.update_layout(
+                height=300,
+                margin=dict(l=10,r=10,t=20,b=10),
+                showlegend=False,
+                yaxis=dict(categoryorder="array", categoryarray=list(reversed(RFQ_STATUS))),
+            )
+            fig_funnel.update_traces(textposition="outside")
+            st.plotly_chart(fig_funnel, use_container_width=True)
 
-    with right:
-        st.markdown("### ⏳ RFQ Aging")
+        # Pipeline composition
+        comp = pd.DataFrame({
+            "狀態": ["進行中","已成交","未成交"],
+            "案件數": [active, won, lost_count]
+        })
+        fig_comp = px.pie(comp, names="狀態", values="案件數", hole=0.35)
+        fig_comp.update_layout(height=270, margin=dict(l=5,r=5,t=20,b=5), legend_orientation="h")
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+    with col_mid:
+        st.markdown('<div class="si-panel-title">RFQ Aging 與業務績效</div>', unsafe_allow_html=True)
+
         aging = view[view["_active"] & view["_created"].notna()].copy()
         aging["_days"] = (today_intel - aging["_created"].dt.normalize()).dt.days.clip(lower=0)
 
@@ -5249,81 +5323,173 @@ with tab_intelligence:
             if d <= 60: return "31–60 天"
             return "60+ 天"
 
-        if aging.empty:
-            st.info("目前沒有進行中案件。")
-        else:
+        if not aging.empty:
             aging["區間"] = aging["_days"].apply(_aging_bucket)
-            order = ["0–7 天", "8–14 天", "15–30 天", "31–60 天", "60+ 天"]
-            aging_sum = aging["區間"].value_counts().reindex(order, fill_value=0).rename_axis("案件老化").reset_index(name="案件數")
-            st.dataframe(aging_sum, use_container_width=True, hide_index=True)
-            st.metric("超過 30 天未成交", f"{int((aging['_days'] > 30).sum())} 件")
+            order = ["0–7 天","8–14 天","15–30 天","31–60 天","60+ 天"]
+            aging_sum = (
+                aging["區間"].value_counts()
+                .reindex(order, fill_value=0)
+                .rename_axis("案件老化")
+                .reset_index(name="案件數")
+            )
+            fig_age = px.bar(aging_sum, x="案件老化", y="案件數", text="案件數")
+            fig_age.update_layout(height=275, margin=dict(l=10,r=10,t=20,b=10), showlegend=False)
+            st.plotly_chart(fig_age, use_container_width=True)
+        else:
+            st.info("目前沒有進行中 Aging 資料。")
 
-    st.divider()
-    st.markdown("### ⚠️ 需要立即處理")
+        owners = view.copy()
+        owners["owner"] = owners["owner"].fillna("待確認").astype(str).replace("", "待確認")
+        if not owners.empty:
+            owner_sum = owners.groupby("owner").agg(
+                詢價=("RFQ_ID","size"),
+                報價=("_quoted","sum"),
+                成交=("_won","sum"),
+                成交金額=("_won_amount","sum")
+            ).reset_index().rename(columns={"owner":"業務"})
+            owner_sum["成交率"] = (
+                owner_sum["成交"] / owner_sum["報價"].replace(0,pd.NA) * 100
+            ).fillna(0).round(1)
 
-    attention = view[view["_active"]].copy()
-    attention["_alert"] = attention["_followup"].fillna(attention["_due"])
-    attention["_overdue"] = (today_intel - attention["_alert"].dt.normalize()).dt.days
-    attention = attention[attention["_alert"].notna() & (attention["_overdue"] > 0)].sort_values("_overdue", ascending=False)
+            fig_owner = go.Figure()
+            fig_owner.add_bar(
+                x=owner_sum["業務"],
+                y=owner_sum["詢價"],
+                name="詢價件數"
+            )
+            fig_owner.add_trace(go.Scatter(
+                x=owner_sum["業務"],
+                y=owner_sum["成交率"],
+                name="成交率 %",
+                mode="lines+markers",
+                yaxis="y2"
+            ))
+            fig_owner.update_layout(
+                height=290,
+                margin=dict(l=10,r=10,t=20,b=10),
+                yaxis=dict(title="案件數"),
+                yaxis2=dict(title="成交率 %", overlaying="y", side="right", range=[0,100]),
+                legend=dict(orientation="h")
+            )
+            st.plotly_chart(fig_owner, use_container_width=True)
 
-    if attention.empty:
-        st.success("目前沒有逾期追蹤案件。")
-    else:
-        alert_table = attention[["RFQ_ID", "customer", "_product", "owner", "status", "_alert", "_overdue"]].copy()
-        alert_table.columns = ["RFQ ID", "客戶", "產品", "業務", "狀態", "應追蹤日", "逾期天數"]
-        alert_table["應追蹤日"] = alert_table["應追蹤日"].dt.strftime("%Y-%m-%d")
-        st.dataframe(alert_table, use_container_width=True, hide_index=True)
+    with col_right:
+        st.markdown('<div class="si-panel-title">銷售戰情明細</div>', unsafe_allow_html=True)
 
-    st.divider()
-    c1, c2 = st.columns(2)
+        detail = view.copy()
+        detail["建立日"] = detail["_created"].dt.strftime("%Y-%m-%d")
+        detail["成交金額"] = detail["_deal_amount"].round(0)
+        detail["報價"] = detail["_quoted"].map({True:"是", False:"否"})
+        detail["成交"] = detail["_won"].map({True:"是", False:"否"})
+        detail_show = detail[
+            ["RFQ_ID","customer","_product","country","owner","status",
+             "報價","成交","成交金額","建立日"]
+        ].copy()
+        detail_show.columns = [
+            "RFQ ID","客戶","產品","國家","業務","狀態",
+            "已報價","已成交","成交金額","建立日"
+        ]
+        st.dataframe(
+            detail_show.sort_values("建立日", ascending=False),
+            use_container_width=True,
+            hide_index=True,
+            height=590
+        )
 
-    with c1:
-        st.markdown("### 🌍 市場機會")
-        market = view[(view["country"] != "未分類") & (view["_product"].str.strip() != "")].copy()
+    # -------------------------------------------------------------
+    # Second row: country/product opportunity + overdue detail
+    # -------------------------------------------------------------
+    market_col, alert_col = st.columns([1.45,1])
+
+    with market_col:
+        st.markdown('<div class="si-panel-title">國家 × 產品市場機會</div>', unsafe_allow_html=True)
+
+        market = view[
+            (view["country"] != "未分類") &
+            (view["_product"].astype(str).str.strip() != "")
+        ].copy()
+
         if market.empty:
             st.info("尚無足夠的國家 / 產品資料。")
         else:
-            market["_won_amount"] = market["_deal_amount"].where(market["_won"], 0)
-            ms = market.groupby(["continent", "country", "_product"]).agg(
-                詢價件數=("RFQ_ID", "size"),
-                報價件數=("_quoted", "sum"),
-                成交件數=("_won", "sum"),
-                成交金額=("_won_amount", "sum")
-            ).reset_index()
-            ms.columns = ["洲別", "國家", "產品", "詢價件數", "報價件數", "成交件數", "成交金額"]
-            ms["成交率 (%)"] = (ms["成交件數"] / ms["報價件數"].replace(0, pd.NA) * 100).fillna(0).round(1)
-            st.dataframe(ms.sort_values(["成交金額", "詢價件數"], ascending=False).head(15), use_container_width=True, hide_index=True)
+            ms = market.groupby(["country","_product"]).agg(
+                詢價件數=("RFQ_ID","size"),
+                報價件數=("_quoted","sum"),
+                成交件數=("_won","sum"),
+                成交金額=("_won_amount","sum")
+            ).reset_index().rename(columns={"country":"國家","_product":"產品"})
+            ms["成交率 (%)"] = (
+                ms["成交件數"] / ms["報價件數"].replace(0,pd.NA) * 100
+            ).fillna(0).round(1)
+            ms = ms.sort_values(["成交金額","詢價件數"], ascending=False)
 
-    with c2:
-        st.markdown("### 👤 業務戰力")
-        owners = view.copy()
-        owners["owner"] = owners["owner"].fillna("待確認").astype(str).replace("", "待確認")
-        owners["_won_amount"] = owners["_deal_amount"].where(owners["_won"], 0)
-        if owners.empty:
-            st.info("目前沒有業務資料。")
+            top_ms = ms.head(12)
+            fig_market = px.bar(
+                top_ms,
+                x="產品",
+                y="詢價件數",
+                color="國家",
+                text="詢價件數",
+                barmode="group"
+            )
+            fig_market.update_layout(
+                height=330,
+                margin=dict(l=10,r=10,t=20,b=10),
+                legend=dict(orientation="h")
+            )
+            st.plotly_chart(fig_market, use_container_width=True)
+            st.dataframe(ms.head(20), use_container_width=True, hide_index=True)
+
+    with alert_col:
+        st.markdown('<div class="si-panel-title">需要立即處理</div>', unsafe_allow_html=True)
+
+        attention = view[view["_active"]].copy()
+        attention["_alert"] = attention["_followup"].fillna(attention["_due"])
+        attention["_overdue"] = (
+            today_intel - attention["_alert"].dt.normalize()
+        ).dt.days
+        attention = attention[
+            attention["_alert"].notna() & (attention["_overdue"] > 0)
+        ].sort_values("_overdue", ascending=False)
+
+        if attention.empty:
+            st.success("目前沒有逾期追蹤案件。")
         else:
-            osum = owners.groupby("owner").agg(
-                詢價件數=("RFQ_ID", "size"),
-                報價件數=("_quoted", "sum"),
-                成交件數=("_won", "sum"),
-                成交金額=("_won_amount", "sum")
-            ).reset_index().rename(columns={"owner": "業務"})
-            osum["成交率 (%)"] = (osum["成交件數"] / osum["報價件數"].replace(0, pd.NA) * 100).fillna(0).round(1)
-            st.dataframe(osum.sort_values(["成交金額", "成交件數"], ascending=False), use_container_width=True, hide_index=True)
+            at = attention[
+                ["RFQ_ID","customer","_product","owner","status","_alert","_overdue"]
+            ].copy()
+            at.columns = ["RFQ ID","客戶","產品","業務","狀態","應追蹤日","逾期天數"]
+            at["應追蹤日"] = at["應追蹤日"].dt.strftime("%Y-%m-%d")
+            st.metric("逾期案件", f"{len(at)} 件")
+            st.dataframe(at, use_container_width=True, hide_index=True, height=430)
 
-    st.divider()
-    st.markdown("### ❌ Lost Order 失單情報")
+    # -------------------------------------------------------------
+    # Lost order
+    # -------------------------------------------------------------
+    st.markdown('<div class="si-panel-title">Lost Order 失單情報</div>', unsafe_allow_html=True)
     lost = view[view["_lost"]].copy()
+
     if lost.empty:
         st.info("目前期間沒有未成交案件。")
     else:
         lost["lost_reason"] = lost["lost_reason"].fillna("未填寫").astype(str).replace("", "未填寫")
-        lost_sum = lost["lost_reason"].value_counts().rename_axis("未成交原因").reset_index(name="案件數")
-        l1, l2 = st.columns([1, 2])
-        with l1:
+        lost_sum = (
+            lost["lost_reason"].value_counts()
+            .rename_axis("未成交原因")
+            .reset_index(name="案件數")
+        )
+        lc1, lc2 = st.columns([1,2])
+        with lc1:
             st.dataframe(lost_sum, use_container_width=True, hide_index=True)
-        with l2:
-            st.bar_chart(lost_sum.set_index("未成交原因")["案件數"], use_container_width=True)
+        with lc2:
+            fig_lost = px.bar(
+                lost_sum,
+                x="未成交原因",
+                y="案件數",
+                text="案件數"
+            )
+            fig_lost.update_layout(height=300, margin=dict(l=10,r=10,t=20,b=10), showlegend=False)
+            st.plotly_chart(fig_lost, use_container_width=True)
 
 
 # ################################################################
