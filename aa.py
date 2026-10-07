@@ -732,7 +732,7 @@ def save_status_log(
 # 18. 頁面 Tabs
 # =========================================================
 
-tab_rfq, tab_board, tab_quote, tab_kpi, tab_gantt, tab_sales, tab_log = st.tabs(
+tab_rfq, tab_board, tab_quote, tab_kpi, tab_gantt, tab_sales, tab_intelligence, tab_log = st.tabs(
 
     [
         "📋 RFQ追蹤表",
@@ -741,6 +741,7 @@ tab_rfq, tab_board, tab_quote, tab_kpi, tab_gantt, tab_sales, tab_log = st.tabs(
         "📈 KPI儀表板",
         "📅 甘特圖",
         "📊 銷售分析",
+        "🎯 Sales Intelligence",
         "📜 StatusLog"
     ]
 
@@ -5126,6 +5127,203 @@ with tab_sales:
                 lost_reason.set_index("未成交原因")["案件數"],
                 use_container_width=True
             )
+
+
+# ################################################################
+# ################################################################
+# TAB 7：SALES INTELLIGENCE 銷售戰情室
+# ################################################################
+
+with tab_intelligence:
+
+    st.subheader("🎯 Sales Intelligence 銷售戰情室")
+    st.caption("詢價 → 報價 → 追蹤 → 成交的主管戰情頁；同步監控 Aging、逾期案件、市場機會與失單原因。")
+
+    intel = df.copy()
+
+    intel_defaults = {
+        "RFQ_ID": "", "customer": "", "title": "", "status": "",
+        "owner": "", "created_time": "", "due_time": "",
+        "first_followup_due": "", "product_category": "",
+        "product_model": "", "continent": "", "country": "",
+        "sales_result": "進行中", "deal_date": "",
+        "deal_amount": 0.0, "lost_reason": ""
+    }
+    for col, default in intel_defaults.items():
+        if col not in intel.columns:
+            intel[col] = default
+
+    intel["_created"] = pd.to_datetime(intel["created_time"], errors="coerce")
+    intel["_due"] = pd.to_datetime(intel["due_time"], errors="coerce")
+    intel["_followup"] = pd.to_datetime(intel["first_followup_due"], errors="coerce")
+    intel["_deal_date"] = pd.to_datetime(intel["deal_date"], errors="coerce")
+    intel["_deal_amount"] = pd.to_numeric(intel["deal_amount"], errors="coerce").fillna(0)
+    intel["sales_result"] = intel["sales_result"].fillna("進行中").astype(str).replace("", "進行中")
+    intel["country"] = intel["country"].fillna("").astype(str).replace("", "未分類")
+    intel["continent"] = intel["continent"].fillna("").astype(str).replace("", "未分類")
+    intel["product_model"] = intel["product_model"].fillna("").astype(str)
+    intel["_product"] = intel["product_model"].where(
+        intel["product_model"].str.strip() != "",
+        intel["title"].fillna("").astype(str)
+    )
+
+    today_intel = pd.Timestamp.now().normalize()
+    valid_created = intel["_created"].dropna()
+    default_start = valid_created.min().date() if not valid_created.empty else today_intel.date()
+
+    f1, f2, f3 = st.columns([1, 1, 1.5])
+    with f1:
+        intel_start = st.date_input("分析起始日", default_start, key="intel_start")
+    with f2:
+        intel_end = st.date_input("分析結束日", today_intel.date(), key="intel_end")
+    with f3:
+        owner_opts = sorted([x for x in intel["owner"].dropna().astype(str).unique() if x.strip()])
+        intel_owners = st.multiselect("業務", owner_opts, default=owner_opts, key="intel_owner_filter")
+
+    if intel_start > intel_end:
+        st.error("起始日不可晚於結束日。")
+        view = intel.iloc[0:0].copy()
+    else:
+        s = pd.Timestamp(intel_start)
+        e = pd.Timestamp(intel_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        view = intel[intel["_created"].between(s, e, inclusive="both")].copy()
+        if intel_owners:
+            view = view[view["owner"].astype(str).isin(intel_owners)]
+
+    # 已報價判斷：狀態已走到報價階段即視為已報價
+    view["_quoted"] = view["status"].astype(str).isin(["已報價", "追蹤中", "結案"])
+    view["_won"] = view["sales_result"].eq("已成交")
+    view["_lost"] = view["sales_result"].eq("未成交")
+    view["_active"] = ~view["sales_result"].isin(["已成交", "未成交"])
+
+    total = len(view)
+    quoted = int(view["_quoted"].sum())
+    won = int(view["_won"].sum())
+    active = int(view["_active"].sum())
+    deal_amount = float(view.loc[view["_won"], "_deal_amount"].sum())
+    conversion = won / quoted * 100 if quoted else 0
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("詢價件數", f"{total} 件")
+    m2.metric("已報價", f"{quoted} 件")
+    m3.metric("進行中", f"{active} 件")
+    m4.metric("已成交", f"{won} 件")
+    m5.metric("成交率", f"{conversion:.1f}%")
+    m6.metric("成交金額", money(deal_amount))
+
+    st.divider()
+    left, right = st.columns(2)
+
+    with left:
+        st.markdown("### 🔻 Sales Funnel")
+        funnel = pd.DataFrame([
+            {"階段": s, "案件數": int((view["status"].astype(str) == s).sum())}
+            for s in RFQ_STATUS
+        ])
+        funnel = funnel[funnel["案件數"] > 0]
+        if funnel.empty:
+            st.info("目前沒有流程資料。")
+        else:
+            max_n = max(int(funnel["案件數"].max()), 1)
+            for _, r in funnel.iterrows():
+                width = max(12, int(r["案件數"] / max_n * 100))
+                st.markdown(
+                    f"""<div style="margin:7px 0">
+                    <div style="display:flex;justify-content:space-between;font-weight:700">
+                    <span>{r['階段']}</span><span>{int(r['案件數'])} 件</span></div>
+                    <div style="height:24px;background:#1f2937;border-radius:6px;overflow:hidden">
+                    <div style="width:{width}%;height:100%;background:linear-gradient(90deg,#2563eb,#38bdf8)"></div>
+                    </div></div>""",
+                    unsafe_allow_html=True
+                )
+
+    with right:
+        st.markdown("### ⏳ RFQ Aging")
+        aging = view[view["_active"] & view["_created"].notna()].copy()
+        aging["_days"] = (today_intel - aging["_created"].dt.normalize()).dt.days.clip(lower=0)
+
+        def _aging_bucket(d):
+            if d <= 7: return "0–7 天"
+            if d <= 14: return "8–14 天"
+            if d <= 30: return "15–30 天"
+            if d <= 60: return "31–60 天"
+            return "60+ 天"
+
+        if aging.empty:
+            st.info("目前沒有進行中案件。")
+        else:
+            aging["區間"] = aging["_days"].apply(_aging_bucket)
+            order = ["0–7 天", "8–14 天", "15–30 天", "31–60 天", "60+ 天"]
+            aging_sum = aging["區間"].value_counts().reindex(order, fill_value=0).rename_axis("案件老化").reset_index(name="案件數")
+            st.dataframe(aging_sum, use_container_width=True, hide_index=True)
+            st.metric("超過 30 天未成交", f"{int((aging['_days'] > 30).sum())} 件")
+
+    st.divider()
+    st.markdown("### ⚠️ 需要立即處理")
+
+    attention = view[view["_active"]].copy()
+    attention["_alert"] = attention["_followup"].fillna(attention["_due"])
+    attention["_overdue"] = (today_intel - attention["_alert"].dt.normalize()).dt.days
+    attention = attention[attention["_alert"].notna() & (attention["_overdue"] > 0)].sort_values("_overdue", ascending=False)
+
+    if attention.empty:
+        st.success("目前沒有逾期追蹤案件。")
+    else:
+        alert_table = attention[["RFQ_ID", "customer", "_product", "owner", "status", "_alert", "_overdue"]].copy()
+        alert_table.columns = ["RFQ ID", "客戶", "產品", "業務", "狀態", "應追蹤日", "逾期天數"]
+        alert_table["應追蹤日"] = alert_table["應追蹤日"].dt.strftime("%Y-%m-%d")
+        st.dataframe(alert_table, use_container_width=True, hide_index=True)
+
+    st.divider()
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown("### 🌍 市場機會")
+        market = view[(view["country"] != "未分類") & (view["_product"].str.strip() != "")].copy()
+        if market.empty:
+            st.info("尚無足夠的國家 / 產品資料。")
+        else:
+            market["_won_amount"] = market["_deal_amount"].where(market["_won"], 0)
+            ms = market.groupby(["continent", "country", "_product"]).agg(
+                詢價件數=("RFQ_ID", "size"),
+                報價件數=("_quoted", "sum"),
+                成交件數=("_won", "sum"),
+                成交金額=("_won_amount", "sum")
+            ).reset_index()
+            ms.columns = ["洲別", "國家", "產品", "詢價件數", "報價件數", "成交件數", "成交金額"]
+            ms["成交率 (%)"] = (ms["成交件數"] / ms["報價件數"].replace(0, pd.NA) * 100).fillna(0).round(1)
+            st.dataframe(ms.sort_values(["成交金額", "詢價件數"], ascending=False).head(15), use_container_width=True, hide_index=True)
+
+    with c2:
+        st.markdown("### 👤 業務戰力")
+        owners = view.copy()
+        owners["owner"] = owners["owner"].fillna("待確認").astype(str).replace("", "待確認")
+        owners["_won_amount"] = owners["_deal_amount"].where(owners["_won"], 0)
+        if owners.empty:
+            st.info("目前沒有業務資料。")
+        else:
+            osum = owners.groupby("owner").agg(
+                詢價件數=("RFQ_ID", "size"),
+                報價件數=("_quoted", "sum"),
+                成交件數=("_won", "sum"),
+                成交金額=("_won_amount", "sum")
+            ).reset_index().rename(columns={"owner": "業務"})
+            osum["成交率 (%)"] = (osum["成交件數"] / osum["報價件數"].replace(0, pd.NA) * 100).fillna(0).round(1)
+            st.dataframe(osum.sort_values(["成交金額", "成交件數"], ascending=False), use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.markdown("### ❌ Lost Order 失單情報")
+    lost = view[view["_lost"]].copy()
+    if lost.empty:
+        st.info("目前期間沒有未成交案件。")
+    else:
+        lost["lost_reason"] = lost["lost_reason"].fillna("未填寫").astype(str).replace("", "未填寫")
+        lost_sum = lost["lost_reason"].value_counts().rename_axis("未成交原因").reset_index(name="案件數")
+        l1, l2 = st.columns([1, 2])
+        with l1:
+            st.dataframe(lost_sum, use_container_width=True, hide_index=True)
+        with l2:
+            st.bar_chart(lost_sum.set_index("未成交原因")["案件數"], use_container_width=True)
 
 
 # ################################################################
