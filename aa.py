@@ -108,8 +108,13 @@ RFQ_COLUMNS = [
     "exception",
     "approved_quote",
     "quote_sent",
-    "first_followup_due"
-
+    "first_followup_due",
+    "product_category",
+    "product_model",
+    "sales_result",
+    "deal_date",
+    "deal_amount",
+    "lost_reason"
 ]
 
 
@@ -654,7 +659,7 @@ def save_status_log(
 # 18. 頁面 Tabs
 # =========================================================
 
-tab_rfq, tab_board, tab_quote, tab_kpi, tab_gantt, tab_log = st.tabs(
+tab_rfq, tab_board, tab_quote, tab_kpi, tab_gantt, tab_sales, tab_log = st.tabs(
 
     [
         "📋 RFQ追蹤表",
@@ -662,6 +667,7 @@ tab_rfq, tab_board, tab_quote, tab_kpi, tab_gantt, tab_log = st.tabs(
         "💰 報價產生器",
         "📈 KPI儀表板",
         "📅 甘特圖",
+        "📊 銷售分析",
         "📜 StatusLog"
     ]
 
@@ -4021,7 +4027,356 @@ with tab_gantt:
 
 
 # ################################################################
-# TAB 6：STATUS LOG
+# TAB 6：產品販售分析 / 業務銷售分析
+# ################################################################
+
+with tab_sales:
+    st.subheader("📊 產品販售分析 / 業務銷售分析")
+    st.caption("分析來源：Tasks + Quotes。成交分析僅使用明確標記為「已成交」的案件，不把「結案」自動視為成交。")
+
+    st.markdown("### ✍️ 成交資料登錄")
+    if df.empty:
+        st.info("目前沒有 RFQ 可登錄成交資料。")
+    else:
+        sales_edit_options = (
+            df["RFQ_ID"].fillna("").astype(str)
+            + "｜"
+            + df["customer"].fillna("").astype(str)
+            + "｜"
+            + df["title"].fillna("").astype(str)
+        ).tolist()
+
+        selected_sales_case = st.selectbox(
+            "選擇 RFQ",
+            options=sales_edit_options,
+            key="sales_edit_rfq"
+        )
+        selected_sales_idx = sales_edit_options.index(selected_sales_case)
+        selected_sales_row = df.iloc[selected_sales_idx]
+
+        ec1, ec2, ec3 = st.columns(3)
+        with ec1:
+            edit_result = st.selectbox(
+                "成交狀態",
+                ["進行中", "已成交", "未成交"],
+                index=(
+                    ["進行中", "已成交", "未成交"].index(str(selected_sales_row.get("sales_result", "進行中")))
+                    if str(selected_sales_row.get("sales_result", "進行中")) in ["進行中", "已成交", "未成交"]
+                    else 0
+                ),
+                key="sales_edit_result"
+            )
+        with ec2:
+            existing_deal_date = pd.to_datetime(selected_sales_row.get("deal_date", ""), errors="coerce")
+            edit_deal_date = st.date_input(
+                "成交日期",
+                value=(existing_deal_date.date() if pd.notna(existing_deal_date) else datetime.now().date()),
+                key="sales_edit_date"
+            )
+        with ec3:
+            edit_deal_amount = st.number_input(
+                "成交金額",
+                min_value=0.0,
+                value=float(pd.to_numeric(selected_sales_row.get("deal_amount", 0), errors="coerce") or 0),
+                step=1000.0,
+                key="sales_edit_amount"
+            )
+
+        lost_options = ["", "價格", "交期", "規格", "客戶取消", "競爭對手", "其他"]
+        current_lost = str(selected_sales_row.get("lost_reason", "") or "")
+        edit_lost_reason = st.selectbox(
+            "未成交原因",
+            lost_options,
+            index=(lost_options.index(current_lost) if current_lost in lost_options else 0),
+            disabled=(edit_result != "未成交"),
+            key="sales_edit_lost_reason"
+        )
+
+        if st.button("💾 儲存成交資料", type="primary", key="save_sales_result"):
+            real_idx = df.index[selected_sales_idx]
+            df.loc[real_idx, "sales_result"] = edit_result
+            df.loc[real_idx, "deal_date"] = (
+                edit_deal_date.strftime("%Y-%m-%d")
+                if edit_result == "已成交"
+                else ""
+            )
+            df.loc[real_idx, "deal_amount"] = (
+                float(edit_deal_amount)
+                if edit_result == "已成交"
+                else 0.0
+            )
+            df.loc[real_idx, "lost_reason"] = (
+                edit_lost_reason
+                if edit_result == "未成交"
+                else ""
+            )
+            conn.update(worksheet="Tasks", data=df)
+            st.success("成交資料已儲存。")
+            st.rerun()
+
+    st.divider()
+
+    sales_df = df.copy()
+
+    # 相容舊資料：缺少的新欄位自動補空值
+    sales_defaults = {
+        "product_category": "",
+        "product_model": "",
+        "sales_result": "進行中",
+        "deal_date": "",
+        "deal_amount": 0.0,
+        "lost_reason": "",
+        "owner": "待確認",
+        "customer": "",
+        "created_time": "",
+        "status": "",
+        "RFQ_ID": "",
+        "title": "",
+    }
+    for col, default in sales_defaults.items():
+        if col not in sales_df.columns:
+            sales_df[col] = default
+
+    sales_df["product_category"] = sales_df["product_category"].fillna("").astype(str)
+    sales_df["product_model"] = sales_df["product_model"].fillna("").astype(str)
+    sales_df["owner"] = sales_df["owner"].fillna("待確認").astype(str).replace("", "待確認")
+    sales_df["customer"] = sales_df["customer"].fillna("").astype(str)
+    sales_df["sales_result"] = sales_df["sales_result"].fillna("進行中").astype(str).replace("", "進行中")
+    sales_df["_created_dt"] = pd.to_datetime(sales_df["created_time"], errors="coerce")
+    sales_df["_deal_dt"] = pd.to_datetime(sales_df["deal_date"], errors="coerce")
+    sales_df["_deal_amount"] = pd.to_numeric(sales_df["deal_amount"], errors="coerce").fillna(0.0)
+
+    # 舊案件若只有 title，可暫時以 title 當型號顯示，避免分析完全空白。
+    sales_df["_analysis_model"] = sales_df["product_model"].where(
+        sales_df["product_model"].str.strip() != "",
+        sales_df["title"].fillna("").astype(str)
+    )
+    sales_df["_analysis_category"] = sales_df["product_category"].where(
+        sales_df["product_category"].str.strip() != "",
+        "未分類"
+    )
+
+    try:
+        sales_quotes = conn.read(worksheet="Quotes", ttl=0)
+    except Exception:
+        sales_quotes = pd.DataFrame()
+
+    if sales_quotes is None:
+        sales_quotes = pd.DataFrame()
+
+    if not sales_quotes.empty:
+        if "RFQ_ID" not in sales_quotes.columns:
+            sales_quotes["RFQ_ID"] = ""
+        if "quote_total" not in sales_quotes.columns:
+            sales_quotes["quote_total"] = 0.0
+        if "quote_date" not in sales_quotes.columns:
+            sales_quotes["quote_date"] = ""
+
+        sales_quotes["_quote_total"] = pd.to_numeric(
+            sales_quotes["quote_total"], errors="coerce"
+        ).fillna(0.0)
+        sales_quotes["_quote_dt"] = pd.to_datetime(
+            sales_quotes["quote_date"], errors="coerce"
+        )
+
+        quote_by_rfq = (
+            sales_quotes.groupby("RFQ_ID", as_index=False)
+            .agg(
+                報價次數=("RFQ_ID", "size"),
+                報價金額=("_quote_total", "sum"),
+                首次報價日=("_quote_dt", "min"),
+            )
+        )
+        sales_df = sales_df.merge(quote_by_rfq, on="RFQ_ID", how="left")
+    else:
+        sales_df["報價次數"] = 0
+        sales_df["報價金額"] = 0.0
+        sales_df["首次報價日"] = pd.NaT
+
+    sales_df["報價次數"] = pd.to_numeric(sales_df["報價次數"], errors="coerce").fillna(0).astype(int)
+    sales_df["報價金額"] = pd.to_numeric(sales_df["報價金額"], errors="coerce").fillna(0.0)
+    sales_df["_quoted"] = sales_df["報價次數"] > 0
+    sales_df["_won"] = sales_df["sales_result"] == "已成交"
+
+    # 分析期間
+    valid_dates = pd.concat([
+        sales_df["_created_dt"].dropna(),
+        sales_df["_deal_dt"].dropna()
+    ])
+    default_start = valid_dates.min().date() if not valid_dates.empty else datetime.now().date().replace(day=1)
+    default_end = valid_dates.max().date() if not valid_dates.empty else datetime.now().date()
+
+    a1, a2, a3 = st.columns([1, 1, 1.2])
+    with a1:
+        analysis_start = st.date_input("分析起始日", value=default_start, key="sales_analysis_start")
+    with a2:
+        analysis_end = st.date_input("分析結束日", value=default_end, key="sales_analysis_end")
+    with a3:
+        analysis_basis = st.selectbox(
+            "期間依據",
+            ["詢價建立日", "成交日"],
+            key="sales_analysis_basis"
+        )
+
+    if analysis_end < analysis_start:
+        st.error("分析結束日不可早於起始日。")
+    else:
+        s = pd.Timestamp(analysis_start)
+        e = pd.Timestamp(analysis_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        basis_col = "_created_dt" if analysis_basis == "詢價建立日" else "_deal_dt"
+        analysis_df = sales_df[
+            sales_df[basis_col].notna()
+            & (sales_df[basis_col] >= s)
+            & (sales_df[basis_col] <= e)
+        ].copy()
+
+        total_rfq = len(analysis_df)
+        quoted_count = int(analysis_df["_quoted"].sum())
+        won_count = int(analysis_df["_won"].sum())
+        quote_amount = float(analysis_df["報價金額"].sum())
+        deal_amount = float(analysis_df.loc[analysis_df["_won"], "_deal_amount"].sum())
+        win_rate = won_count / quoted_count * 100 if quoted_count else 0.0
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("詢價件數", f"{total_rfq} 件")
+        m2.metric("已報價", f"{quoted_count} 件")
+        m3.metric("已成交", f"{won_count} 件")
+        m4.metric("成交率", f"{win_rate:.1f}%")
+        m5.metric("成交金額", money(deal_amount))
+
+        st.caption(f"期間報價總額：{money(quote_amount)}")
+
+        product_tab, owner_tab = st.tabs(["📦 產品販售分析", "👤 業務銷售分析"])
+
+        with product_tab:
+            category_summary = (
+                analysis_df.groupby("_analysis_category", dropna=False)
+                .agg(
+                    詢價件數=("RFQ_ID", "size"),
+                    報價件數=("_quoted", "sum"),
+                    報價金額=("報價金額", "sum"),
+                    成交件數=("_won", "sum"),
+                    成交金額=("_deal_amount", lambda x: x[analysis_df.loc[x.index, "_won"]].sum()),
+                )
+                .reset_index()
+                .rename(columns={"_analysis_category": "產品分類"})
+            )
+            if not category_summary.empty:
+                category_summary["成交率 (%)"] = (
+                    category_summary["成交件數"]
+                    / category_summary["報價件數"].replace(0, pd.NA)
+                    * 100
+                ).fillna(0).round(1)
+                category_summary = category_summary.sort_values("成交金額", ascending=False)
+                st.markdown("#### 產品分類績效")
+                st.dataframe(category_summary, use_container_width=True, hide_index=True)
+
+            model_summary = (
+                analysis_df.groupby("_analysis_model", dropna=False)
+                .agg(
+                    詢價件數=("RFQ_ID", "size"),
+                    報價件數=("_quoted", "sum"),
+                    報價金額=("報價金額", "sum"),
+                    成交件數=("_won", "sum"),
+                    成交金額=("_deal_amount", lambda x: x[analysis_df.loc[x.index, "_won"]].sum()),
+                )
+                .reset_index()
+                .rename(columns={"_analysis_model": "產品型號"})
+            )
+            model_summary = model_summary[model_summary["產品型號"].astype(str).str.strip() != ""]
+            if model_summary.empty:
+                st.info("目前期間內沒有產品型號資料。")
+            else:
+                model_summary["成交率 (%)"] = (
+                    model_summary["成交件數"]
+                    / model_summary["報價件數"].replace(0, pd.NA)
+                    * 100
+                ).fillna(0).round(1)
+                model_summary = model_summary.sort_values(
+                    ["成交金額", "成交件數", "詢價件數"], ascending=False
+                )
+                st.markdown("#### 產品型號績效")
+                st.dataframe(model_summary, use_container_width=True, hide_index=True)
+
+                top_models = model_summary.head(10).set_index("產品型號")
+                st.markdown("#### Top 10 型號－成交金額")
+                st.bar_chart(top_models["成交金額"], use_container_width=True)
+
+        with owner_tab:
+            owner_summary = (
+                analysis_df.groupby("owner", dropna=False)
+                .agg(
+                    詢價件數=("RFQ_ID", "size"),
+                    客戶數=("customer", lambda x: x[x.astype(str).str.strip() != ""].nunique()),
+                    報價件數=("_quoted", "sum"),
+                    報價金額=("報價金額", "sum"),
+                    成交件數=("_won", "sum"),
+                    成交金額=("_deal_amount", lambda x: x[analysis_df.loc[x.index, "_won"]].sum()),
+                )
+                .reset_index()
+                .rename(columns={"owner": "業務"})
+            )
+
+            if owner_summary.empty:
+                st.info("目前期間內沒有業務資料。")
+            else:
+                owner_summary["成交率 (%)"] = (
+                    owner_summary["成交件數"]
+                    / owner_summary["報價件數"].replace(0, pd.NA)
+                    * 100
+                ).fillna(0).round(1)
+
+                # 平均報價時間
+                cycle = analysis_df[
+                    analysis_df["_created_dt"].notna()
+                    & pd.to_datetime(analysis_df["首次報價日"], errors="coerce").notna()
+                ].copy()
+                if not cycle.empty:
+                    cycle["_first_quote"] = pd.to_datetime(cycle["首次報價日"], errors="coerce")
+                    cycle["_quote_days"] = (
+                        cycle["_first_quote"] - cycle["_created_dt"]
+                    ).dt.total_seconds() / 86400
+                    cycle = cycle[cycle["_quote_days"] >= 0]
+                    owner_cycle = cycle.groupby("owner")["_quote_days"].mean().round(1)
+                    owner_summary["平均報價天數"] = owner_summary["業務"].map(owner_cycle)
+                else:
+                    owner_summary["平均報價天數"] = pd.NA
+
+                owner_summary = owner_summary.sort_values(
+                    ["成交金額", "成交件數"], ascending=False
+                )
+                st.markdown("#### 業務績效排名")
+                st.dataframe(owner_summary, use_container_width=True, hide_index=True)
+
+                st.markdown("#### 業務成交金額")
+                st.bar_chart(
+                    owner_summary.set_index("業務")["成交金額"],
+                    use_container_width=True
+                )
+
+        # 未成交原因
+        lost_df = analysis_df[analysis_df["sales_result"] == "未成交"].copy()
+        if not lost_df.empty:
+            st.divider()
+            st.markdown("### ❌ 未成交原因分析")
+            lost_reason = (
+                lost_df["lost_reason"]
+                .fillna("未填寫")
+                .astype(str)
+                .replace("", "未填寫")
+                .value_counts()
+                .rename_axis("未成交原因")
+                .reset_index(name="案件數")
+            )
+            st.dataframe(lost_reason, use_container_width=True, hide_index=True)
+            st.bar_chart(
+                lost_reason.set_index("未成交原因")["案件數"],
+                use_container_width=True
+            )
+
+
+# ################################################################
+# TAB 7：STATUS LOG
 # ################################################################
 
 with tab_log:
