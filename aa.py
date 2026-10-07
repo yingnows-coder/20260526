@@ -3240,9 +3240,47 @@ with tab_kpi:
             width:100%; font-family:Arial,'Microsoft JhengHei',sans-serif;
             color:#222; box-sizing:border-box;">
           <div style="font-size:20px;font-weight:700;margin:4px 0 2px 0;">{title}</div>
-          <div style="font-size:12px;color:#666;margin-bottom:8px;">
+          <div style="font-size:13px;color:#cbd5e1;margin-bottom:10px;font-weight:600;">
             氣泡大小＝{size_col}｜可用滑鼠拖曳氣泡，放開後會依力學重新排列
           </div>
+
+          <div style="
+              display:grid;
+              grid-template-columns:1.15fr 1fr 1fr 1fr;
+              gap:1px;
+              margin-bottom:10px;
+              border:1px solid #d9d9d9;
+              border-radius:8px;
+              overflow:hidden;
+              background:#d9d9d9;
+              font-size:12px;">
+            <div style="background:#2563eb;color:#ffffff;padding:13px 10px;font-weight:900;font-size:17px;line-height:1.35;text-align:center;display:flex;align-items:center;justify-content:center;min-height:48px;box-sizing:border-box;">
+              分析項目
+            </div>
+            <div style="background:#2563eb;color:#ffffff;padding:13px 10px;font-weight:900;font-size:17px;line-height:1.35;text-align:center;display:flex;align-items:center;justify-content:center;min-height:48px;box-sizing:border-box;">
+              X 軸
+            </div>
+            <div style="background:#2563eb;color:#ffffff;padding:13px 10px;font-weight:900;font-size:17px;line-height:1.35;text-align:center;display:flex;align-items:center;justify-content:center;min-height:48px;box-sizing:border-box;">
+              Y 軸
+            </div>
+            <div style="background:#2563eb;color:#ffffff;padding:13px 10px;font-weight:900;font-size:17px;line-height:1.35;text-align:center;display:flex;align-items:center;justify-content:center;min-height:48px;box-sizing:border-box;">
+              氣泡大小
+            </div>
+
+            <div style="background:#111827;color:#ffffff;padding:11px 10px;text-align:center;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;min-height:42px;box-sizing:border-box;">
+              {title}
+            </div>
+            <div style="background:#111827;color:#ffffff;padding:11px 10px;text-align:center;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;min-height:42px;box-sizing:border-box;">
+              {x_title}
+            </div>
+            <div style="background:#111827;color:#ffffff;padding:11px 10px;text-align:center;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;min-height:42px;box-sizing:border-box;">
+              {y_title}
+            </div>
+            <div style="background:#111827;color:#ffffff;padding:11px 10px;text-align:center;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;min-height:42px;box-sizing:border-box;">
+              {size_col}
+            </div>
+          </div>
+
           <canvas id="forceCanvas" style="
               width:100%;height:500px;border:1px solid #ddd;border-radius:10px;
               background:transparent;touch-action:none;"></canvas>
@@ -3334,20 +3372,58 @@ with tab_kpi:
             for (const n of nodes) {{
               ctx.beginPath();
               ctx.arc(n.x,n.y,n.radius,0,Math.PI*2);
-              ctx.fillStyle=`hsla(${{n.hue}},62%,55%,0.72)`;
+              // 高對比、高彩度氣泡
+              const bubbleColors = [
+                ["#15803d", "#4ade80"],
+                ["#b45309", "#fbbf24"],
+                ["#b91c1c", "#f87171"],
+                ["#1d4ed8", "#60a5fa"],
+                ["#6d28d9", "#c084fc"],
+                ["#0e7490", "#22d3ee"],
+                ["#be185d", "#f472b6"]
+              ];
+              const pair = bubbleColors[nodes.indexOf(n) % bubbleColors.length];
+
+              const grad = ctx.createRadialGradient(
+                n.x - n.radius * 0.30,
+                n.y - n.radius * 0.32,
+                n.radius * 0.06,
+                n.x,
+                n.y,
+                n.radius
+              );
+              grad.addColorStop(0, pair[1]);
+              grad.addColorStop(1, pair[0]);
+
+              ctx.fillStyle = grad;
+              ctx.shadowColor = pair[1];
+              ctx.shadowBlur = 14;
               ctx.fill();
-              ctx.strokeStyle=`hsla(${{n.hue}},65%,35%,0.9)`;
-              ctx.lineWidth=1.2;
+
+              ctx.shadowBlur = 0;
+              ctx.strokeStyle = pair[1];
+              ctx.lineWidth = 2;
               ctx.stroke();
 
-              ctx.fillStyle="#111";
-              ctx.textAlign="center";
-              ctx.textBaseline="middle";
-              ctx.font=`600 ${{Math.max(10, Math.min(14,n.radius/3.2))}}px Arial`;
+              // 氣泡內文字：水平置中 + 垂直置中 + 白色粗體
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillStyle = "#ffffff";
+              ctx.shadowColor = "rgba(0,0,0,0.85)";
+              ctx.shadowBlur = 4;
+
               const label = n.label.length > 12 ? n.label.slice(0,11)+"…" : n.label;
-              ctx.fillText(label,n.x,n.y-5);
-              ctx.font="11px Arial";
-              ctx.fillText(String(n.sizeValue),n.x,n.y+12);
+              const labelSize = Math.max(12, Math.min(18, n.radius / 2.7));
+              const valueSize = Math.max(12, Math.min(17, n.radius / 3));
+
+              // 名稱與數值以氣泡中心為基準上下對稱
+              ctx.font = `800 ${{labelSize}}px Arial, "Microsoft JhengHei", sans-serif`;
+              ctx.fillText(label, n.x, n.y - 10);
+
+              ctx.font = `800 ${{valueSize}}px Arial, "Microsoft JhengHei", sans-serif`;
+              ctx.fillText(String(n.sizeValue), n.x, n.y + 12);
+
+              ctx.shadowBlur = 0;
             }}
           }}
 
@@ -3413,7 +3489,7 @@ with tab_kpi:
         }})();
         </script>
         """
-        components.html(html, height=570, scrolling=False)
+        components.html(html, height=650, scrolling=False)
 
     st.subheader("📈 RFQ / 報價 KPI 儀表板")
     st.caption("依 Tasks、Quotes、StatusLog 即時計算；不另外輸入 KPI 數字。")
