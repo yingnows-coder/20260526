@@ -631,13 +631,14 @@ def save_status_log(
 # 18. 頁面 Tabs
 # =========================================================
 
-tab_rfq, tab_board, tab_quote, tab_kpi, tab_log = st.tabs(
+tab_rfq, tab_board, tab_quote, tab_kpi, tab_gantt, tab_log = st.tabs(
 
     [
         "📋 RFQ追蹤表",
         "📊 RFQ看板",
         "💰 報價產生器",
         "📈 KPI儀表板",
+        "📅 甘特圖",
         "📜 StatusLog"
     ]
 
@@ -3501,8 +3502,401 @@ with tab_kpi:
         )
 
 
+
 # ################################################################
-# TAB 5：STATUS LOG
+# TAB 5：RFQ 甘特圖
+# ################################################################
+
+with tab_gantt:
+
+    st.subheader("📅 RFQ 甘特圖")
+    st.caption("以 RFQ 建立日期為開始日、到期日為結束日，快速查看案件時程、負責人與逾期狀況。")
+
+    gantt_df = df.copy()
+
+    if gantt_df.empty:
+        st.info("目前沒有 RFQ 資料。")
+
+    else:
+        # ---------------------------------------------------------
+        # 欄位與日期正規化
+        # ---------------------------------------------------------
+        for col in [
+            "RFQ_ID", "customer", "title", "owner",
+            "status", "created_time", "due_time", "next_step"
+        ]:
+            if col not in gantt_df.columns:
+                gantt_df[col] = ""
+
+        gantt_df["_start"] = pd.to_datetime(
+            gantt_df["created_time"],
+            errors="coerce"
+        )
+
+        gantt_df["_end"] = pd.to_datetime(
+            gantt_df["due_time"],
+            errors="coerce"
+        )
+
+        gantt_df["owner"] = (
+            gantt_df["owner"]
+            .fillna("待確認")
+            .astype(str)
+            .replace("", "待確認")
+        )
+
+        gantt_df["status"] = (
+            gantt_df["status"]
+            .fillna("待確認")
+            .astype(str)
+            .replace("", "待確認")
+        )
+
+        gantt_df["customer"] = gantt_df["customer"].fillna("").astype(str)
+        gantt_df["title"] = gantt_df["title"].fillna("").astype(str)
+        gantt_df["RFQ_ID"] = gantt_df["RFQ_ID"].fillna("").astype(str)
+
+        # ---------------------------------------------------------
+        # 篩選器
+        # ---------------------------------------------------------
+        f1, f2, f3 = st.columns([1, 1, 1.4])
+
+        owner_options = sorted(
+            [
+                x for x in gantt_df["owner"].dropna().unique().tolist()
+                if str(x).strip()
+            ]
+        )
+
+        status_options = [
+            s for s in RFQ_STATUS
+            if s in gantt_df["status"].unique().tolist()
+        ]
+
+        with f1:
+            selected_owners = st.multiselect(
+                "👤 負責人",
+                options=owner_options,
+                default=[],
+                key="gantt_owner_filter"
+            )
+
+        with f2:
+            selected_statuses = st.multiselect(
+                "📌 狀態",
+                options=status_options,
+                default=[],
+                key="gantt_status_filter"
+            )
+
+        with f3:
+            gantt_search = st.text_input(
+                "🔎 搜尋",
+                placeholder="RFQ ID / 客戶 / 品名",
+                key="gantt_search"
+            ).strip()
+
+        show_closed = st.checkbox(
+            "顯示已結案案件",
+            value=True,
+            key="gantt_show_closed"
+        )
+
+        filtered_gantt = gantt_df.copy()
+
+        if selected_owners:
+            filtered_gantt = filtered_gantt[
+                filtered_gantt["owner"].isin(selected_owners)
+            ]
+
+        if selected_statuses:
+            filtered_gantt = filtered_gantt[
+                filtered_gantt["status"].isin(selected_statuses)
+            ]
+
+        if not show_closed:
+            filtered_gantt = filtered_gantt[
+                filtered_gantt["status"] != "結案"
+            ]
+
+        if gantt_search:
+            search_mask = (
+                filtered_gantt["RFQ_ID"].str.contains(
+                    gantt_search, case=False, na=False
+                )
+                | filtered_gantt["customer"].str.contains(
+                    gantt_search, case=False, na=False
+                )
+                | filtered_gantt["title"].str.contains(
+                    gantt_search, case=False, na=False
+                )
+            )
+            filtered_gantt = filtered_gantt[search_mask]
+
+        # 甘特圖需要開始日；沒有到期日則無法畫完整時程
+        valid_gantt = filtered_gantt[
+            filtered_gantt["_start"].notna()
+            & filtered_gantt["_end"].notna()
+        ].copy()
+
+        # 若 due_time 比 created_time 早，先排除並在下方提醒
+        invalid_date_mask = (
+            valid_gantt["_end"] < valid_gantt["_start"]
+        )
+        invalid_date_count = int(invalid_date_mask.sum())
+
+        valid_gantt = valid_gantt[
+            ~invalid_date_mask
+        ].copy()
+
+        today_gantt = pd.Timestamp(datetime.now().date())
+
+        valid_gantt["逾期"] = (
+            (valid_gantt["_end"].dt.normalize() < today_gantt)
+            & (valid_gantt["status"] != "結案")
+        )
+
+        valid_gantt["工期天數"] = (
+            valid_gantt["_end"].dt.normalize()
+            - valid_gantt["_start"].dt.normalize()
+        ).dt.days + 1
+
+        # ---------------------------------------------------------
+        # 摘要
+        # ---------------------------------------------------------
+        g1, g2, g3, g4 = st.columns(4)
+
+        g1.metric(
+            "顯示案件",
+            f"{len(valid_gantt)} 件"
+        )
+
+        g2.metric(
+            "逾期",
+            f"{int(valid_gantt['逾期'].sum()) if not valid_gantt.empty else 0} 件"
+        )
+
+        g3.metric(
+            "無完整日期",
+            f"{len(filtered_gantt) - len(valid_gantt) - invalid_date_count} 件"
+        )
+
+        g4.metric(
+            "日期異常",
+            f"{invalid_date_count} 件"
+        )
+
+        st.divider()
+
+        if valid_gantt.empty:
+            st.info("目前篩選條件下沒有可繪製甘特圖的 RFQ。請確認 created_time 與 due_time 都有日期。")
+
+        else:
+            # -----------------------------------------------------
+            # 使用 Plotly 畫真正的甘特圖
+            # -----------------------------------------------------
+            try:
+                import plotly.express as px
+
+                plot_df = valid_gantt.copy()
+
+                plot_df["案件"] = (
+                    plot_df["RFQ_ID"]
+                    + "｜"
+                    + plot_df["customer"]
+                    + "｜"
+                    + plot_df["title"]
+                )
+
+                # 同一狀態仍用 Plotly 自動配色；逾期另加文字提示
+                plot_df["顯示狀態"] = plot_df["status"]
+                plot_df.loc[
+                    plot_df["逾期"],
+                    "顯示狀態"
+                ] = plot_df.loc[
+                    plot_df["逾期"],
+                    "status"
+                ] + "｜逾期"
+
+                plot_df = plot_df.sort_values(
+                    ["_start", "_end"],
+                    ascending=[True, True]
+                )
+
+                fig = px.timeline(
+                    plot_df,
+                    x_start="_start",
+                    x_end="_end",
+                    y="案件",
+                    color="顯示狀態",
+                    hover_name="RFQ_ID",
+                    hover_data={
+                        "customer": True,
+                        "title": True,
+                        "owner": True,
+                        "status": True,
+                        "_start": "|%Y-%m-%d",
+                        "_end": "|%Y-%m-%d",
+                        "工期天數": True,
+                        "逾期": True,
+                        "案件": False,
+                        "顯示狀態": False,
+                    },
+                    labels={
+                        "_start": "開始日",
+                        "_end": "到期日",
+                        "customer": "客戶",
+                        "title": "品名",
+                        "owner": "負責人",
+                        "status": "狀態",
+                        "工期天數": "工期",
+                        "逾期": "是否逾期",
+                        "顯示狀態": "狀態",
+                    },
+                )
+
+                fig.update_yaxes(
+                    autorange="reversed",
+                    title=""
+                )
+
+                fig.update_xaxes(
+                    title="日期",
+                    showgrid=True
+                )
+
+                fig.update_layout(
+                    height=max(
+                        430,
+                        min(1100, 170 + len(plot_df) * 38)
+                    ),
+                    margin=dict(
+                        l=10,
+                        r=10,
+                        t=35,
+                        b=20
+                    ),
+                    legend_title_text="狀態",
+                    hoverlabel=dict(
+                        namelength=-1
+                    ),
+                )
+
+                # 今天參考線
+                fig.add_vline(
+                    x=today_gantt.timestamp() * 1000,
+                    line_dash="dash",
+                    annotation_text="今天",
+                    annotation_position="top"
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    key="rfq_gantt_chart"
+                )
+
+            except ImportError:
+                st.warning(
+                    "甘特圖需要 plotly。請在 requirements.txt 加入 plotly 後重新部署。"
+                )
+
+            except Exception as e:
+                st.warning(f"甘特圖產生失敗：{e}")
+
+            # -----------------------------------------------------
+            # 甘特明細
+            # -----------------------------------------------------
+            st.markdown("### 📋 甘特圖明細")
+
+            gantt_detail = valid_gantt.copy()
+
+            gantt_detail["開始日"] = (
+                gantt_detail["_start"]
+                .dt.strftime("%Y-%m-%d")
+            )
+
+            gantt_detail["到期日"] = (
+                gantt_detail["_end"]
+                .dt.strftime("%Y-%m-%d")
+            )
+
+            gantt_detail["逾期狀態"] = gantt_detail["逾期"].map(
+                {
+                    True: "⚠️ 逾期",
+                    False: ""
+                }
+            )
+
+            gantt_detail = gantt_detail[
+                [
+                    "RFQ_ID",
+                    "customer",
+                    "title",
+                    "owner",
+                    "status",
+                    "開始日",
+                    "到期日",
+                    "工期天數",
+                    "逾期狀態",
+                    "next_step",
+                ]
+            ].rename(
+                columns={
+                    "customer": "客戶",
+                    "title": "品名",
+                    "owner": "負責人",
+                    "status": "狀態",
+                    "next_step": "下一步",
+                }
+            )
+
+            st.dataframe(
+                gantt_detail,
+                use_container_width=True,
+                hide_index=True
+            )
+
+        # ---------------------------------------------------------
+        # 日期不完整案件
+        # ---------------------------------------------------------
+        missing_date_df = filtered_gantt[
+            filtered_gantt["_start"].isna()
+            | filtered_gantt["_end"].isna()
+        ].copy()
+
+        if not missing_date_df.empty:
+            with st.expander(
+                f"⚠️ 尚未顯示於甘特圖：缺少日期 {len(missing_date_df)} 件"
+            ):
+                missing_cols = [
+                    "RFQ_ID",
+                    "customer",
+                    "title",
+                    "owner",
+                    "status",
+                    "created_time",
+                    "due_time",
+                ]
+
+                st.dataframe(
+                    missing_date_df[missing_cols].rename(
+                        columns={
+                            "customer": "客戶",
+                            "title": "品名",
+                            "owner": "負責人",
+                            "status": "狀態",
+                            "created_time": "建立日期",
+                            "due_time": "到期日",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+
+# ################################################################
+# TAB 6：STATUS LOG
 # ################################################################
 
 with tab_log:
