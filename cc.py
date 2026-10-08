@@ -319,16 +319,28 @@ with signature_tab:
             if st.button('💾 儲存客戶簽名', type='primary', key=f'save_signature_{selected_id}'):
                 if not signer.strip():
                     st.error('請先輸入簽收人姓名。')
-                elif canvas.image_data is None or not canvas.json_data or not canvas.json_data.get('objects'):
-                    st.error('請先在簽名區書寫。')
                 else:
+                    # Some streamlit-drawable-canvas versions return no image_data_url.
+                    # Accessing canvas.image_data in that case raises RuntimeError.
+                    # Read the drawing metadata first and handle missing image safely.
                     try:
-                        encoded = signature_to_base64(canvas.image_data)
-                        df.at[selected_idx, 'customer_signature'] = encoded
-                        df.at[selected_idx, 'signed_by'] = signer.strip()
-                        df.at[selected_idx, 'signed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        df.at[selected_idx, 'updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        save_tickets(df)
+                        drawing = canvas.json_data or {}
+                        if not drawing.get('objects'):
+                            st.error('請先在簽名區書寫，再按儲存。')
+                        else:
+                            try:
+                                signature_image = canvas.image_data
+                            except (RuntimeError, ValueError, AttributeError):
+                                signature_image = None
+                            if signature_image is None:
+                                st.warning('簽名元件尚未回傳圖片。請在畫布重新簽名後再試；若持續發生，可能是此元件與目前 Streamlit 版本不相容。')
+                            else:
+                                encoded = signature_to_base64(signature_image)
+                                df.at[selected_idx, 'customer_signature'] = encoded
+                                df.at[selected_idx, 'signed_by'] = signer.strip()
+                                df.at[selected_idx, 'signed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                df.at[selected_idx, 'updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                save_tickets(df)
                     except Exception as exc:
                         st.error(f'簽名儲存失敗：{exc}')
         st.divider()
