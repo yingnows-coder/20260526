@@ -390,11 +390,18 @@ def make_ticket_pdf(ticket):
             bbox=gray.point(lambda px:255 if px<205 else 0).getbbox()
             if bbox:
                 source=source.crop(bbox)
-                max_w=W-52*mm
-                max_h=sign_h-5*mm
-                factor=min(max_w/source.width,max_h/source.height)
-                iw,ih=source.width*factor,source.height*factor
-                c.drawImage(ImageReader(source),x0+(W-iw)/2,y+(sign_h-ih)/2,width=iw,height=ih)
+                # 簽名採固定上限，禁止因原始筆跡較小而被放大到整個簽名框。
+                # 預留左側欄位標題空間，簽名在右側區域等比例置中。
+                max_w = 72*mm
+                max_h = 15*mm
+                natural_scale = 72.0 / 110.0  # 原始畫布約 110 DPI，避免過度放大
+                factor = min(max_w/source.width, max_h/source.height, natural_scale)
+                iw, ih = source.width*factor, source.height*factor
+                region_left = x0 + 42*mm
+                region_width = W - 47*mm
+                draw_x = region_left + (region_width-iw)/2
+                draw_y = y + (sign_h-ih)/2 - 1*mm
+                c.drawImage(ImageReader(source), draw_x, draw_y, width=iw, height=ih)
         except Exception:
             txt(x0+45*mm,y+10*mm,'簽名圖片無法載入',8)
     txt(x0+3,y-10,'簽收人：'+value('signed_by')+'   簽收時間：'+value('signed_at'),8)
@@ -597,7 +604,7 @@ with form_tab:
         if signed:
             st.success(f'已簽收：{safe_str(ticket.get("signed_by", ""))}　{safe_str(ticket.get("signed_at", ""))}')
             try:
-                st.image(base64.b64decode(safe_str(ticket['customer_signature'])), use_container_width=True)
+                st.image(base64.b64decode(safe_str(ticket['customer_signature'])), width=340)
             except Exception:
                 st.warning('已存簽名資料，但無法顯示預覽。')
         else:
