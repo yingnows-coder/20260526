@@ -71,7 +71,7 @@ with header_title:
 
 # cc.py 獨立部署於 Streamlit Community Cloud 後，將網址填入此處。
 # 例如：https://your-service-app.streamlit.app/
-SERVICE_APP_URL = ""
+SERVICE_APP_URL = "https://jwcncmaintancesheet.streamlit.app/"
 
 nav_spacer, nav_trello, nav_service = st.columns([5, 2.5, 2.5])
 
