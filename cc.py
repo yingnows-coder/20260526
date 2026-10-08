@@ -210,136 +210,183 @@ def signature_from_upload(uploaded):
 
 
 def make_ticket_pdf(ticket):
-    """A4 單頁維修單：內容完整、簽名固定框、依內容自動縮放。"""
-    from reportlab.pdfgen import canvas as pdf_canvas
+    """JENN WEI 售後服務單：參照紙本表格、固定 A4 一頁、簽名框內置中。"""
+    from reportlab.pdfgen import canvas
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     from reportlab.platypus import Paragraph
     from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib import colors
+    from xml.sax.saxutils import escape as xml_escape
 
-    font_name = 'MSung-Light'
-    pdfmetrics.registerFont(UnicodeCIDFont(font_name))
-    output = io.BytesIO()
-    page_w, page_h = A4
-    margin = 15 * mm
-    usable_w = page_w - 2 * margin
-    label_w = 35 * mm
-    body_style = ParagraphStyle('BodyJW', fontName=font_name, fontSize=9, leading=13,
-                                wordWrap='CJK', textColor=colors.HexColor('#233449'))
-    label_style = ParagraphStyle('LabelJW', parent=body_style, fontSize=8.5,
-                                 textColor=colors.HexColor('#526174'))
+    font = 'MSung-Light'
+    pdfmetrics.registerFont(UnicodeCIDFont(font))
+    out = io.BytesIO()
+    c = canvas.Canvas(out, pagesize=A4)
+    c.setTitle('JENN WEI MACHINERY - 售後服務單')
+    pw, ph = A4
+    x0, x1 = 15*mm, pw-15*mm
+    W = x1-x0
+    ink = colors.HexColor('#242424')
+    red = colors.HexColor('#9B352E')
+    c.setStrokeColor(ink)
+    c.setLineWidth(.65)
 
-    def clean(key):
-        return escape(safe_str(ticket.get(key, ''))).replace('\n', '<br/>')
+    def txt(x,y,value,size=9,color=ink):
+        c.setFillColor(color)
+        c.setFont(font,size)
+        c.drawString(x,y,str(value))
 
-    def paragraph(value, style, width):
-        item = Paragraph(value or ' ', style)
-        _, h = item.wrap(width, 100000)
-        return item, h
+    def line(xa,ya,xb,yb):
+        c.line(xa,ya,xb,yb)
 
-    fields = [
-        ('維修單號', 'ticket_id'), ('建立日期', 'created_at'),
-        ('客戶名稱', 'customer'), ('聯絡人', 'contact'),
-        ('聯絡電話', 'phone'), ('機台型號', 'machine_model'),
-        ('機台序號', 'serial_number'), ('保固狀態', 'warranty'),
-        ('優先程度', 'priority'), ('維修狀態', 'status'),
-        ('負責工程師', 'engineer'), ('預定處理日期', 'scheduled_date'),
-        ('故障現象', 'issue'), ('故障診斷', 'diagnosis'),
-        ('維修處置', 'repair_action'), ('更換零件', 'parts'),
-        ('測試／客戶驗收', 'resolution'),
-        ('零件費用', 'parts_cost'), ('維修工時', 'labor_hours'),
-        ('每小時工資', 'labor_rate'), ('維修費用合計', 'total_cost'),
-        ('結案日期', 'closed_at')
-    ]
-    # 預先測量所有文字高度，避免 PDF 產生第二頁或截斷欄位內容。
-    rows = []
-    for label, key in fields:
-        lp, lh = paragraph(escape(label), label_style, label_w - 8)
-        vp, vh = paragraph(clean(key), body_style, usable_w - label_w - 14)
-        height = max(lh, vh) + 9
-        rows.append((lp, vp, height))
+    def box(x,y,w,h):
+        c.rect(x,y,w,h,fill=0,stroke=1)
 
-    title_h = 42
-    sign_title_h = 23
-    sign_box_h = 43 * mm
-    footer_h = 54
-    natural_h = title_h + sum(row[2] for row in rows) + 12 + sign_title_h + sign_box_h + footer_h
-    available_h = page_h - 2 * margin
-    scale = min(1.0, available_h / natural_h)
+    def value(key):
+        return safe_str(ticket.get(key,''))
 
-    pdf = pdf_canvas.Canvas(output, pagesize=A4)
-    pdf.setTitle('JENN-WEI 售服維修服務單')
-    pdf.saveState()
-    # 只縮放內容、不分頁。居中於 A4 可用區域。
-    x_origin = (page_w - usable_w * scale) / 2
-    top_origin = (page_h + natural_h * scale) / 2
-    pdf.translate(x_origin, top_origin)
-    pdf.scale(scale, scale)
-    y = 0
+    def cell(x,y,w,h,label,content='',label_width=None,fontsize=9):
+        box(x,y,w,h)
+        txt(x+4,y+h-13,label,9,red)
+        if content:
+            label_width = label_width if label_width is not None else min(w*.36, 31*mm)
+            para = Paragraph(xml_escape(str(content)).replace('\n','<br/>'),
+                ParagraphStyle('v',fontName=font,fontSize=fontsize,leading=fontsize+2,wordWrap='CJK'))
+            avail_w = max(12,w-label_width-7)
+            _,h2=para.wrap(avail_w, 1000)
+            # 文字過多時限制在欄位內；全文仍保存在 Sheets
+            if h2 <= h-4:
+                para.drawOn(c,x+label_width,y+h-3-h2)
+            else:
+                txt(x+label_width,y+h-13,str(content)[:18]+'…',7)
 
-    pdf.setFont(font_name, 16)
-    pdf.setFillColor(colors.HexColor('#193454'))
-    pdf.drawCentredString(usable_w / 2, y - 21, 'JENN-WEI 震唯機械｜售服維修服務單')
-    y -= title_h
-    for i, (lp, vp, height) in enumerate(rows):
-        pdf.setStrokeColor(colors.HexColor('#D7E0E9'))
-        pdf.setLineWidth(0.4)
-        pdf.setFillColor(colors.HexColor('#F0F4F8'))
-        pdf.rect(0, y - height, label_w, height, stroke=0, fill=1)
-        pdf.line(0, y - height, usable_w, y - height)
-        lp.drawOn(pdf, 5, y - 5 - lp.height)
-        vp.drawOn(pdf, label_w + 7, y - 5 - vp.height)
-        y -= height
+    def multiline_box(x,y,w,h,label,content):
+        box(x,y,w,h)
+        txt(x+5,y+h-14,label,9,red)
+        raw = str(content or '')
+        for sz in [9,8,7,6,5]:
+            style=ParagraphStyle('m',fontName=font,fontSize=sz,leading=sz+2,wordWrap='CJK')
+            para=Paragraph(xml_escape(raw).replace('\n','<br/>') or ' ',style)
+            _,ht=para.wrap(w-13,10000)
+            if ht<=h-25:
+                para.drawOn(c,x+6,y+h-22-ht)
+                return
+        # 极端長文字以縮放繪製，不會新增第二頁
+        c.saveState()
+        scale=min(1.,(h-25)/max(ht,1))
+        c.translate(x+6,y+4)
+        c.scale(scale,scale)
+        para.wrap((w-13)/scale,10000)
+        para.drawOn(c,0,0)
+        c.restoreState()
 
-    y -= 12
-    pdf.setFont(font_name, 10)
-    pdf.setFillColor(colors.HexColor('#193454'))
-    pdf.drawString(0, y - 13, '客戶簽收／驗收確認')
-    y -= sign_title_h
-
-    # 簽名框：固定區域、保留內距，筆跡裁白後等比例置中。
-    box_y = y - sign_box_h
-    pdf.setStrokeColor(colors.HexColor('#5D6F82'))
-    pdf.setLineWidth(0.8)
-    pdf.roundRect(0, box_y, usable_w, sign_box_h, 6, stroke=1, fill=0)
-    pdf.setFont(font_name, 9)
-    pdf.setFillColor(colors.HexColor('#40556A'))
-    pdf.drawString(7*mm, y - 9*mm, '客戶簽名：')
-    encoded = safe_str(ticket.get('customer_signature', ''))
-    if encoded:
+    # 公司抬頭，依使用者提供的售後服務單格式
+    logo_path = __import__('os').path.join(__import__('os').path.dirname(__file__),'jenn_wei_logo.png')
+    if __import__('os').path.exists(logo_path):
         try:
-            source = Image.open(io.BytesIO(base64.b64decode(encoded))).convert('RGB')
-            gray = source.convert('L')
-            ink = gray.point(lambda v: 255 if v < 210 else 0)
-            bbox = ink.getbbox()
-            if bbox:
-                l, t, r, b = bbox
-                source = source.crop((max(0, l-4), max(0, t-4),
-                                      min(source.width, r+4), min(source.height, b+4)))
-                max_w = usable_w - 28*mm
-                max_h = sign_box_h - 18*mm
-                factor = min(max_w/source.width, max_h/source.height)
-                w, h = source.width*factor, source.height*factor
-                # 以框線下方的有效簽名區為中心，不會蓋住「客戶簽名」標籤。
-                center_y = box_y + (sign_box_h - 9*mm)/2
-                pdf.drawImage(ImageReader(source), (usable_w-w)/2, center_y-h/2,
-                              width=w, height=h, mask='auto')
+            c.drawImage(logo_path,x0,ph-48*mm,width=36*mm,height=32*mm,preserveAspectRatio=True,anchor='c',mask='auto')
         except Exception:
-            pdf.setFont(font_name, 8)
-            pdf.drawCentredString(usable_w/2, box_y + sign_box_h/2, '簽名圖片無法顯示')
-    y = box_y - 10*mm
-    signed_by = escape(safe_str(ticket.get('signed_by', '')))
-    signed_at = escape(safe_str(ticket.get('signed_at', '')))
-    info, info_h = paragraph(f'簽收人：{signed_by}　　簽收時間：{signed_at}', body_style, usable_w)
-    info.drawOn(pdf, 0, y - info_h)
-    y -= info_h + 4*mm
-    note, note_h = paragraph('本單據記錄現場維修及簽收資訊，簽收不代表另行承諾保固或費用條件。', label_style, usable_w)
-    note.drawOn(pdf, 0, y - note_h)
-    pdf.restoreState()
-    pdf.showPage()
-    pdf.save()
-    return output.getvalue()
+            pass
+    txt(x0+41*mm,ph-20*mm,'震唯機械股份有限公司',15)
+    c.setFont('Helvetica-Bold',10)
+    c.drawString(x0+41*mm,ph-25*mm,'JENN WEI MACHINERY CO., LTD.')
+    c.setFont('Helvetica',7.5)
+    c.drawString(x0+41*mm,ph-30*mm,'E-mail: L3352368@ms49.hinet.net')
+    c.drawString(x0+41*mm,ph-34*mm,'http://www.jennwei.com.tw/')
+    c.drawString(x0+41*mm,ph-38*mm,'TEL: 886-4-23352368   FAX: 886-4-23353880')
+    c.setFillColor(red)
+    c.setFont(font,14)
+    c.drawCentredString(pw/2,ph-53*mm,'售後服務單')
+    c.setFillColor(ink)
+    c.setFont('Helvetica',8)
+    c.drawRightString(x1,ph-53*mm,'No. '+value('ticket_id'))
+
+    # 表格自上而下。A4 固定 1 頁
+    top = ph-59*mm
+    row=11*mm
+    y=top-row
+    cell(x0,y,W*.46,row,'客戶名稱：',value('customer'))
+    cell(x0+W*.46,y,W*.31,row,'電話：',value('phone'))
+    cell(x0+W*.77,y,W*.23,row,'日期：',value('created_at')[:10],18*mm,8)
+    y-=row
+    cell(x0,y,W,row,'住址：',value('address'))
+    y-=row
+    cell(x0,y,W*.35,row,'機型：',value('machine_model'))
+    cell(x0+W*.35,y,W*.35,row,'機號：',value('serial_number'))
+    cell(x0+W*.70,y,W*.30,row,'出廠日：',value('manufacture_date'))
+
+    fault_h=29*mm
+    y-=fault_h
+    multiline_box(x0,y,W,fault_h,'故障原因：',value('diagnosis') or value('issue'))
+    action_h=30*mm
+    y-=action_h
+    multiline_box(x0,y,W,action_h,'處理方式：',value('repair_action') or value('resolution'))
+
+    y-=10*mm
+    cell(x0,y,W*.30,10*mm,'到達時間：',value('arrival_time'))
+    cell(x0+W*.30,y,W*.30,10*mm,'離開時間：',value('departure_time'))
+    cell(x0+W*.60,y,W*.40,10*mm,'本案是否完成：', '是' if value('status')=='已結案' else '待確認',33*mm)
+    y-=10*mm
+    cell(x0,y,W,10*mm,'未處理完成、再處理日期：',value('scheduled_date'))
+
+    # 零件費用明細，與原始紙本的 10 列一致
+    parts_h=6.4*mm
+    y-=parts_h
+    fractions=[.50,.14,.14,.22]
+    heads=['零件名稱編號','單價','數量','小計']
+    cursor=x0
+    for frac,head in zip(fractions,heads):
+        box(cursor,y,W*frac,parts_h)
+        c.setFont(font,8)
+        c.drawCentredString(cursor+W*frac/2,y+2*mm,head)
+        cursor+=W*frac
+    part_lines=[p.strip() for p in value('parts').replace('；','\n').replace(';','\n').splitlines() if p.strip()]
+    for i in range(10):
+        y-=parts_h
+        cursor=x0
+        values=[f'{i+1}. '+(part_lines[i] if i<len(part_lines) else ''),'','','']
+        for frac,entry in zip(fractions,values):
+            box(cursor,y,W*frac,parts_h)
+            if entry:
+                txt(cursor+3,y+2*mm,entry[:55],7)
+            cursor+=W*frac
+
+    y-=10*mm
+    cell(x0,y,W*.34,10*mm,'服務費：',value('labor_hours'))
+    cell(x0+W*.34,y,W*.30,10*mm,'5% 稅金：','')
+    cell(x0+W*.64,y,W*.36,10*mm,'費用總計：',value('total_cost'))
+
+    # 保留簽名框在同一頁；姓名/時間與筆跡不重疊
+    y-=11*mm
+    cell(x0,y,W*.33,11*mm,'服務人員：',value('engineer'))
+    cell(x0+W*.33,y,W*.33,11*mm,'售服主管：','')
+    cell(x0+W*.66,y,W*.34,11*mm,'業務主管：','')
+    sign_h=24*mm
+    y-=sign_h
+    box(x0,y,W,sign_h)
+    txt(x0+4,y+sign_h-11,'客戶確認／簽名：',9,red)
+    signature=value('customer_signature')
+    if signature:
+        try:
+            source=Image.open(io.BytesIO(base64.b64decode(signature))).convert('RGB')
+            gray=source.convert('L')
+            bbox=gray.point(lambda px:255 if px<205 else 0).getbbox()
+            if bbox:
+                source=source.crop(bbox)
+                max_w=W-52*mm
+                max_h=sign_h-5*mm
+                factor=min(max_w/source.width,max_h/source.height)
+                iw,ih=source.width*factor,source.height*factor
+                c.drawImage(ImageReader(source),x0+(W-iw)/2,y+(sign_h-ih)/2,width=iw,height=ih)
+        except Exception:
+            txt(x0+45*mm,y+10*mm,'簽名圖片無法載入',8)
+    txt(x0+3,y-10,'簽收人：'+value('signed_by')+'   簽收時間：'+value('signed_at'),8)
+    txt(x0+3,y-23,'本單據記錄維修及簽收資訊；簽收不代表另行承諾保固或費用條件。',7)
+    c.showPage()
+    c.save()
+    return out.getvalue()
 
 
 df = read_tickets()
