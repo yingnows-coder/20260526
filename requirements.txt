@@ -5,3 +5,6 @@ openpyxl
 Pillow
 reportlab
 plotly
+customer_signature
+signed_by
+signed_at
