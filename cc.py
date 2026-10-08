@@ -1,993 +1,147 @@
 import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
-from datetime import datetime, timedelta
+from datetime import datetime, date
 import uuid
 
-# ==========================================
-# 基本設定
-# ==========================================
+st.set_page_config(page_title='JENN-WEI 售服維修管理系統', page_icon='🛠️', layout='wide')
+st.title('🛠️ JENN-WEI 售服維修管理系統')
+st.caption('Service Management | 報修、派工、維修、驗收與售服績效')
+st.link_button('📋 RFQ 詢價追蹤系統', 'https://aazzyybb.streamlit.app/', disabled=True) if False else None
 
-st.set_page_config(
-    page_title="企業版 RFQ 詢價追蹤系統",
-    layout="wide"
-)
+SHEET = 'ServiceTickets'
+COLUMNS = ['ticket_id','created_at','customer','contact','phone','machine_model','serial_number','warranty','issue','priority','status','engineer','scheduled_date','diagnosis','repair_action','parts','parts_cost','labor_hours','labor_rate','total_cost','resolution','closed_at','updated_at']
+STATUSES = ['新報修','待確認','待派工','待零件','維修中','待驗收','已結案']
+PRIORITIES = ['一般','急件','緊急']
+conn = st.connection('gsheets', type=GSheetsConnection)
 
-st.title("📌 企業版：RFQ 詢價追蹤管理系統")
-st.caption("edit by 林溫城")
-
-# ==========================================
-# BB頁面導航
-# ==========================================
-
-top1, top2 = st.columns([8, 1])
-
-with top2:
-    st.link_button(
-        "📊 BB頁面",
-        "https://aazzyybb.streamlit.app/"
-    )
-
-# ==========================================
-# Google Sheets
-# ==========================================
-
-conn = st.connection(
-    "gsheets",
-    type=GSheetsConnection
-)
-
-df = conn.read(
-    worksheet="Tasks",
-    ttl=0
-)
-
-# ==========================================
-# RFQ 欄位
-# ==========================================
-
-RFQ_COLUMNS = [
-    "id",
-    "RFQ_ID",
-    "version",
-    "department",
-    "customer",
-    "title",
-    "status",
-    "next_step",
-    "owner",
-    "created_time",
-    "due_time",
-    "updated_time",
-    "evidence",
-    "exception",
-    "approved_quote",
-    "quote_sent",
-    "first_followup_due"
-]
-
-# ==========================================
-# 初始化資料
-# ==========================================
-
-if df.empty:
-
-    df = pd.DataFrame(columns=RFQ_COLUMNS)
-
-else:
-
-    # 補上舊資料缺少的欄位
-    for col in RFQ_COLUMNS:
-
-        if col not in df.columns:
-
-            if col == "version":
-                df[col] = "V1"
-
-            elif col == "owner":
-                df[col] = "業務承辦"
-
-            elif col in ["approved_quote", "quote_sent"]:
-                df[col] = False
-
-            else:
-                df[col] = ""
-
-    # id不存在時補ID
-    if "id" not in df.columns:
-        df["id"] = [
-            str(uuid.uuid4())
-            for _ in range(len(df))
-        ]
-
-    # RFQ_ID不存在時補RFQ_ID
-    if "RFQ_ID" not in df.columns:
-        df["RFQ_ID"] = [
-            f"RFQ-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
-            for _ in range(len(df))
-        ]
-
-# ==========================================
-# 狀態設定
-# ==========================================
-
-RFQ_STATUS = [
-    "新詢價",
-    "待補件",
-    "工程評估",
-    "待核價",
-    "已報價",
-    "追蹤中",
-    "結案"
-]
-
-# ==========================================
-# 計算下一個工作天
-# ==========================================
-
-def next_workday(date_value):
-
-    next_day = date_value + timedelta(days=1)
-
-    while next_day.weekday() >= 5:
-        next_day += timedelta(days=1)
-
-    return next_day
-
-
-# ==========================================
-# 狀態規則
-# ==========================================
-
-STATUS_NEXT_STEP = {
-
-    "新詢價":
-        "確認詢價資料完整性",
-
-    "待補件":
-        "向客戶補問缺漏資料",
-
-    "工程評估":
-        "請工程確認規格與可製造性",
-
-    "待核價":
-        "準備並取得核準報價",
-
-    "已報價":
-        "確認客戶收到報價並追蹤",
-
-    "追蹤中":
-        "追蹤客戶回覆",
-
-    "結案":
-        "完成案件結案紀錄"
-}
-
-
-# ==========================================
-# 驗證狀態
-# ==========================================
-
-def validate_status(row, new_status):
-
-    # 已報價防呆
-    if new_status == "已報價":
-
-        approved = str(
-            row.get("approved_quote", "")
-        ).lower() in ["true", "1", "yes", "是"]
-
-        sent = str(
-            row.get("quote_sent", "")
-        ).lower() in ["true", "1", "yes", "是"]
-
-        if not approved or not sent:
-
-            return False, (
-                "❌ 不可標記「已報價」："
-                "必須同時有「核準報價」與「實際寄送紀錄」。"
-            )
-
-    return True, ""
-
-
-# ==========================================
-# 狀態變更紀錄
-# ==========================================
-
-def save_status_log(
-    rfq_id,
-    old_status,
-    new_status,
-    evidence
-):
-
+def read_tickets():
     try:
-
-        log_df = conn.read(
-            worksheet="StatusLog",
-            ttl=0
-        )
-
-    except Exception:
-
-        log_df = pd.DataFrame()
-
-    log_columns = [
-        "log_id",
-        "RFQ_ID",
-        "change_time",
-        "old_status",
-        "new_status",
-        "evidence"
-    ]
-
-    if log_df.empty:
-
-        log_df = pd.DataFrame(
-            columns=log_columns
-        )
-
-    log_data = {
-        "log_id": str(uuid.uuid4()),
-        "RFQ_ID": rfq_id,
-        "change_time":
-            datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-        "old_status": old_status,
-        "new_status": new_status,
-        "evidence": evidence
-    }
-
-    log_df = pd.concat(
-        [
-            log_df,
-            pd.DataFrame([log_data])
-        ],
-        ignore_index=True
-    )
-
-    conn.update(
-        worksheet="StatusLog",
-        data=log_df
-    )
-
-
-# ==========================================
-# 新增 RFQ
-# ==========================================
-
-st.write("## 📝 建立新詢價 RFQ")
-
-with st.form(
-    "rfq_form",
-    clear_on_submit=True
-):
-
-    c1, c2, c3 = st.columns(
-        [1, 2, 1]
-    )
-
-    with c1:
-
-        new_department = st.selectbox(
-            "🏢 部門",
-            [
-                "業務",
-                "生產",
-                "驗收",
-                "售服"
-            ]
-        )
-
-    with c2:
-
-        new_customer = st.text_input(
-            "🏭 客戶資訊"
-        )
-
-    with c3:
-
-        new_version = st.text_input(
-            "📑 版本",
-            value="V1"
-        )
-
-    c4, c5 = st.columns(
-        [2, 1]
-    )
-
-    with c4:
-
-        new_title = st.text_input(
-            "📌 詢價名稱"
-        )
-
-    with c5:
-
-        new_owner = st.text_input(
-            "👤 負責人",
-            value="業務承辦"
-        )
-
-    new_evidence = st.text_area(
-        "📎 證據／詢價來源",
-        placeholder="例如：客戶 Email、圖面、詢價單、會議紀錄..."
-    )
-
-    new_exception = st.text_area(
-        "⚠️ 異常／缺漏",
-        placeholder="若沒有，請填「無」；資料不足請填「待確認」"
-    )
-
-    new_due_time = st.date_input(
-        "⏰ 到期日",
-        value=None
-    )
-
-    submit_btn = st.form_submit_button(
-        "✅ 建立 RFQ"
-    )
-
-
-# ==========================================
-# 建立 RFQ
-# ==========================================
-
-if submit_btn:
-
-    if not new_title:
-
-        st.error(
-            "❌ 請輸入詢價名稱"
-        )
-
-    else:
-
-        now_dt = datetime.now()
-
-        now = now_dt.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-
-        rfq_id = (
-            f"RFQ-"
-            f"{now_dt.strftime('%Y%m%d')}-"
-            f"{str(uuid.uuid4())[:4].upper()}"
-        )
-
-        # 首次補問：下一個工作天
-        first_followup = next_workday(
-            now_dt.date()
-        )
-
-        # 如果使用者沒有輸入到期日
-        # 不自行指定
-        if new_due_time is None:
-            due_time = "待確認"
-        else:
-            due_time = new_due_time.strftime(
-                "%Y-%m-%d"
-            )
-
-        owner = (
-            new_owner.strip()
-            if new_owner.strip()
-            else "業務承辦"
-        )
-
-        new_data = {
-
-            "id":
-                str(uuid.uuid4()),
-
-            "RFQ_ID":
-                rfq_id,
-
-            "version":
-                new_version.strip()
-                if new_version.strip()
-                else "V1",
-
-            "department":
-                new_department,
-
-            "customer":
-                new_customer,
-
-            "title":
-                new_title,
-
-            "status":
-                "新詢價",
-
-            "next_step":
-                STATUS_NEXT_STEP["新詢價"],
-
-            "owner":
-                owner,
-
-            "created_time":
-                now,
-
-            "due_time":
-                due_time,
-
-            "updated_time":
-                now,
-
-            "evidence":
-                new_evidence
-                if new_evidence.strip()
-                else "待確認",
-
-            "exception":
-                new_exception
-                if new_exception.strip()
-                else "待確認",
-
-            "approved_quote":
-                False,
-
-            "quote_sent":
-                False,
-
-            "first_followup_due":
-                first_followup.strftime(
-                    "%Y-%m-%d"
-                )
-        }
-
-        df = pd.concat(
-            [
-                df,
-                pd.DataFrame([new_data])
-            ],
-            ignore_index=True
-        )
-
-        conn.update(
-            worksheet="Tasks",
-            data=df
-        )
-
-        # 建立初始狀態紀錄
-        save_status_log(
-            rfq_id,
-            "無",
-            "新詢價",
-            new_evidence
-            if new_evidence.strip()
-            else "待確認"
-        )
-
-        st.success(
-            f"✅ RFQ 建立成功：{rfq_id}"
-        )
-
+        data = conn.read(worksheet=SHEET, ttl=300)
+        if data is None:
+            data = pd.DataFrame()
+        for c in COLUMNS:
+            if c not in data.columns:
+                data[c] = ''
+        return data[COLUMNS].copy()
+    except Exception as exc:
+        st.error(f'無法讀取 {SHEET} 工作表。請先在 Google Sheets 建立同名分頁，第一列填入指定欄位。')
+        st.exception(exc)
+        st.stop()
+
+def save_tickets(data):
+    try:
+        conn.update(worksheet=SHEET, data=data[COLUMNS].fillna(''))
+        st.cache_data.clear()
+        st.success('資料已儲存')
         st.rerun()
-
-
-# ==========================================
-# 快捷搜尋
-# ==========================================
-
-st.write("---")
-
-st.write("## 🔎 RFQ 快捷搜尋")
-
-search_keyword = st.text_input(
-    "輸入 RFQ、客戶、詢價名稱、負責人、證據、異常",
-    placeholder="例如：RFQ-20261007、台積電、業務承辦..."
-)
-
-if search_keyword:
-
-    search_mask = (
-        df.astype(str)
-        .apply(
-            lambda col:
-            col.str.contains(
-                search_keyword,
-                case=False,
-                na=False
-            )
-        )
-        .any(axis=1)
-    )
-
-    display_df = df[
-        search_mask
-    ]
-
-else:
-
-    display_df = df
-
-
-# ==========================================
-# RFQ 統計
-# ==========================================
-
-st.write("## 📊 RFQ 狀態統計")
-
-stat_cols = st.columns(
-    len(RFQ_STATUS)
-)
-
-for col, status in zip(
-    stat_cols,
-    RFQ_STATUS
-):
-
-    count = len(
-        df[df["status"] == status]
-    )
-
-    with col:
-
-        st.metric(
-            status,
-            count
-        )
-
-
-# ==========================================
-# RFQ 追蹤表
-# ==========================================
-
-st.write("## 📋 RFQ 追蹤表")
-
-tracking_columns = [
-    "RFQ_ID",
-    "version",
-    "customer",
-    "title",
-    "status",
-    "next_step",
-    "owner",
-    "due_time",
-    "updated_time",
-    "evidence",
-    "exception"
-]
-
-if display_df.empty:
-
-    st.info("目前沒有符合條件的 RFQ")
-
-else:
-
-    st.dataframe(
-        display_df[
-            tracking_columns
-        ],
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ==========================================
-# 看板
-# ==========================================
-
-st.write("---")
-st.write("## 📊 RFQ 管理看板")
-
-board_cols = st.columns(
-    len(RFQ_STATUS)
-)
-
-
-# ==========================================
-# 卡片函式
-# ==========================================
-
-def render_tasks(
-    task_df,
-    column_name
-):
-
-    if task_df.empty:
-
-        st.info(
-            f"目前沒有 {column_name}"
-        )
-
-        return
-
-    for _, row in task_df.iterrows():
-
-        matches = df[
-            df["id"] == row["id"]
-        ].index
-
-        if len(matches) == 0:
-            continue
-
-        real_idx = matches[0]
-
-        with st.container(
-            border=True
-        ):
-
-            st.markdown(
-                f"### 📌 {row['title']}"
-            )
-
-            st.caption(
-                f"🆔 RFQ：{row['RFQ_ID']}"
-            )
-
-            st.caption(
-                f"📑 版本：{row['version']}"
-            )
-
-            st.caption(
-                f"🏢 部門：{row['department']}"
-            )
-
-            st.caption(
-                f"🏭 客戶：{row['customer']}"
-            )
-
-            st.caption(
-                f"👤 負責人：{row['owner']}"
-            )
-
-            st.caption(
-                f"📅 到期日：{row['due_time']}"
-            )
-
-            st.caption(
-                f"🔄 最後更新：{row['updated_time']}"
-            )
-
-            st.caption(
-                f"➡️ 下一步：{row['next_step']}"
-            )
-
-            st.caption(
-                f"📎 證據：{row['evidence']}"
-            )
-
-            st.caption(
-                f"⚠️ 異常：{row['exception']}"
-            )
-
-            # ==================================
-            # 首次補問
-            # ==================================
-
-            if row["status"] in [
-                "新詢價",
-                "待補件"
-            ]:
-
-                st.info(
-                    "📅 首次補問期限："
-                    f"{row['first_followup_due']}"
-                )
-
-            # ==================================
-            # 報價條件
-            # ==================================
-
-            if row["status"] in [
-                "待核價",
-                "已報價",
-                "追蹤中"
-            ]:
-
-                q1, q2 = st.columns(2)
-
-                with q1:
-
-                    approved = st.checkbox(
-                        "✅ 核準報價",
-                        value=(
-                            str(
-                                row.get(
-                                    "approved_quote",
-                                    False
-                                )
-                            ).lower()
-                            in [
-                                "true",
-                                "1",
-                                "yes",
-                                "是"
-                            ]
-                        ),
-                        key=f"approved_{row['id']}"
-                    )
-
-                with q2:
-
-                    sent = st.checkbox(
-                        "📤 實際寄送",
-                        value=(
-                            str(
-                                row.get(
-                                    "quote_sent",
-                                    False
-                                )
-                            ).lower()
-                            in [
-                                "true",
-                                "1",
-                                "yes",
-                                "是"
-                            ]
-                        ),
-                        key=f"sent_{row['id']}"
-                    )
-
-            else:
-
-                approved = row.get(
-                    "approved_quote",
-                    False
-                )
-
-                sent = row.get(
-                    "quote_sent",
-                    False
-                )
-
-            # ==================================
-            # 狀態更新
-            # ==================================
-
-            current_status = row["status"]
-
-            new_status = st.selectbox(
-                "📂 更新狀態",
-                RFQ_STATUS,
-                index=RFQ_STATUS.index(
-                    current_status
-                ),
-                key=f"status_{row['id']}"
-            )
-
-            evidence_update = st.text_area(
-                "📝 狀態變更依據",
-                value="",
-                placeholder="請輸入本次狀態變更的證據，例如：客戶 Email、工程確認、核價單...",
-                key=f"evidence_{row['id']}"
-            )
-
-            next_step_update = st.text_input(
-                "➡️ 下一步",
-                value=row["next_step"],
-                key=f"next_{row['id']}"
-            )
-
-            exception_update = st.text_area(
-                "⚠️ 異常",
-                value=row["exception"],
-                key=f"exception_{row['id']}"
-            )
-
-            # ==================================
-            # 更新
-            # ==================================
-
-            if st.button(
-                "💾 更新 RFQ",
-                key=f"update_{row['id']}"
-            ):
-
-                temp_row = row.copy()
-
-                temp_row["approved_quote"] = approved
-                temp_row["quote_sent"] = sent
-
-                valid, error_message = validate_status(
-                    temp_row,
-                    new_status
-                )
-
-                if not valid:
-
-                    st.error(
-                        error_message
-                    )
-
-                else:
-
-                    old_status = current_status
-
-                    df.loc[
-                        real_idx,
-                        "status"
-                    ] = new_status
-
-                    df.loc[
-                        real_idx,
-                        "next_step"
-                    ] = (
-                        next_step_update
-                        if next_step_update.strip()
-                        else STATUS_NEXT_STEP[
-                            new_status
-                        ]
-                    )
-
-                    df.loc[
-                        real_idx,
-                        "approved_quote"
-                    ] = approved
-
-                    df.loc[
-                        real_idx,
-                        "quote_sent"
-                    ] = sent
-
-                    df.loc[
-                        real_idx,
-                        "evidence"
-                    ] = (
-                        evidence_update
-                        if evidence_update.strip()
-                        else row["evidence"]
-                    )
-
-                    df.loc[
-                        real_idx,
-                        "exception"
-                    ] = (
-                        exception_update
-                        if exception_update.strip()
-                        else row["exception"]
-                    )
-
-                    df.loc[
-                        real_idx,
-                        "updated_time"
-                    ] = datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    )
-
-                    conn.update(
-                        worksheet="Tasks",
-                        data=df
-                    )
-
-                    # 狀態有變更才寫入Log
-                    if old_status != new_status:
-
-                        save_status_log(
-                            row["RFQ_ID"],
-                            old_status,
-                            new_status,
-                            evidence_update
-                            if evidence_update.strip()
-                            else "待確認"
-                        )
-
-                    st.success(
-                        "✅ RFQ 已更新"
-                    )
-
-                    st.rerun()
-
-            # ==================================
-            # 封存
-            # ==================================
-
-            if row["status"] == "結案":
-
-                if st.button(
-                    "📦 封存",
-                    key=f"archive_{row['id']}"
-                ):
-
-                    try:
-
-                        data_df = conn.read(
-                            worksheet="Data",
-                            ttl=0
-                        )
-
-                    except Exception:
-
-                        data_df = pd.DataFrame()
-
-                    if data_df.empty:
-
-                        data_df = pd.DataFrame(
-                            columns=df.columns
-                        )
-
-                    row_data = df.loc[
-                        real_idx
-                    ]
-
-                    data_df = pd.concat(
-                        [
-                            data_df,
-                            pd.DataFrame(
-                                [row_data]
-                            )
-                        ],
-                        ignore_index=True
-                    )
-
-                    conn.update(
-                        worksheet="Data",
-                        data=data_df
-                    )
-
-                    df.drop(
-                        real_idx,
-                        inplace=True
-                    )
-
-                    df.reset_index(
-                        drop=True,
-                        inplace=True
-                    )
-
-                    conn.update(
-                        worksheet="Tasks",
-                        data=df
-                    )
-
-                    st.success(
-                        "✅ RFQ 已封存"
-                    )
-
-                    st.rerun()
-
-            # ==================================
-            # 刪除
-            # ==================================
-
-            if st.button(
-                "🗑️ 刪除",
-                key=f"delete_{row['id']}"
-            ):
-
-                df.drop(
-                    real_idx,
-                    inplace=True
-                )
-
-                df.reset_index(
-                    drop=True,
-                    inplace=True
-                )
-
-                conn.update(
-                    worksheet="Tasks",
-                    data=df
-                )
-
-                st.warning(
-                    "⚠️ RFQ 已刪除"
-                )
-
-                st.rerun()
-
-
-# ==========================================
-# 顯示看板
-# ==========================================
-
-for col, status in zip(
-    board_cols,
-    RFQ_STATUS
-):
-
-    with col:
-
-        st.markdown(
-            f"## {status}"
-        )
-
-        render_tasks(
-            df[df["status"] == status],
-            status
-        )
+    except Exception as exc:
+        st.error('Google Sheets 寫入失敗')
+        st.exception(exc)
+
+def number(value):
+    try:
+        result = pd.to_numeric(value, errors='coerce')
+        return 0.0 if pd.isna(result) else float(result)
+    except (TypeError, ValueError):
+        return 0.0
+
+def safe_str(value):
+    return '' if pd.isna(value) else str(value)
+
+df = read_tickets()
+
+new_tab, manage_tab, dashboard_tab, history_tab = st.tabs(['📝 建立報修單','🔧 維修工單管理','📊 售服 KPI','📚 維修紀錄'])
+with new_tab:
+    st.subheader('建立客戶報修工單')
+    with st.form('new_service_ticket', clear_on_submit=True):
+        a,b,c = st.columns(3)
+        with a:
+            customer = st.text_input('客戶名稱 *')
+            contact = st.text_input('聯絡人')
+            phone = st.text_input('電話 / 聯絡方式')
+        with b:
+            model = st.text_input('機台型號 *')
+            serial = st.text_input('機台序號')
+            warranty = st.selectbox('保固狀態', ['待確認','保固內','保固外'])
+        with c:
+            priority = st.selectbox('緊急程度', PRIORITIES)
+            engineer = st.text_input('預定負責工程師')
+            schedule = st.date_input('預計處理日期', value=date.today())
+        issue = st.text_area('故障現象 / 客戶反映 *')
+        submitted = st.form_submit_button('➕ 建立維修工單', type='primary')
+    if submitted:
+        if not customer.strip() or not model.strip() or not issue.strip():
+            st.error('請填寫客戶名稱、機台型號及故障現象。')
+        else:
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ticket = {c:'' for c in COLUMNS}
+            ticket.update(ticket_id=f'SRV-{datetime.now():%Y%m%d}-{uuid.uuid4().hex[:4].upper()}',created_at=now,customer=customer.strip(),contact=contact.strip(),phone=phone.strip(),machine_model=model.strip(),serial_number=serial.strip(),warranty=warranty,issue=issue.strip(),priority=priority,status='新報修',engineer=engineer.strip(),scheduled_date=str(schedule),parts_cost=0.0,labor_hours=0.0,labor_rate=0.0,total_cost=0.0,updated_at=now)
+            save_tickets(pd.concat([df,pd.DataFrame([ticket])],ignore_index=True))
+
+with manage_tab:
+    st.subheader('維修工單管理')
+    f1,f2,f3 = st.columns(3)
+    with f1: status_filter = st.selectbox('維修狀態', ['全部']+STATUSES)
+    with f2: engineer_filter = st.selectbox('負責工程師', ['全部']+sorted(x for x in df['engineer'].dropna().astype(str).unique() if x.strip()))
+    with f3: keyword = st.text_input('搜尋工單 / 客戶 / 型號 / 序號')
+    view = df.copy()
+    if status_filter != '全部': view = view[view['status']==status_filter]
+    if engineer_filter != '全部': view = view[view['engineer']==engineer_filter]
+    if keyword: view = view[view.astype(str).apply(lambda s:s.str.contains(keyword,case=False,regex=False,na=False)).any(axis=1)]
+    st.caption(f'符合條件工單：{len(view)} 筆')
+    if view.empty:
+        st.info('目前沒有符合條件的維修工單。')
+    else:
+        st.dataframe(view[['ticket_id','customer','machine_model','serial_number','priority','status','engineer','scheduled_date','updated_at']],hide_index=True,use_container_width=True)
+        ticket_id = st.selectbox('選擇要更新的工單',view['ticket_id'].astype(str).tolist())
+        matches = df.index[df['ticket_id'].astype(str)==ticket_id]
+        if len(matches):
+            idx=matches[0]; item=df.loc[idx]
+            with st.form('edit_service_ticket'):
+                st.markdown(f'**{ticket_id}｜{safe_str(item["customer"])}｜{safe_str(item["machine_model"])}**')
+                c1,c2,c3=st.columns(3)
+                with c1:
+                    current=safe_str(item['status']); status=st.selectbox('維修狀態',STATUSES,index=STATUSES.index(current) if current in STATUSES else 0)
+                    priority=safe_str(item['priority']); priority_new=st.selectbox('優先程度',PRIORITIES,index=PRIORITIES.index(priority) if priority in PRIORITIES else 0)
+                with c2:
+                    engineer_new=st.text_input('負責工程師',value=safe_str(item['engineer']))
+                    warranty=safe_str(item['warranty']); warranty_new=st.selectbox('保固', ['待確認','保固內','保固外'],index=['待確認','保固內','保固外'].index(warranty) if warranty in ['待確認','保固內','保固外'] else 0)
+                with c3:
+                    parts_cost=st.number_input('零件費用',min_value=0.0,value=number(item['parts_cost']))
+                    labor_hours=st.number_input('維修工時（小時）',min_value=0.0,value=number(item['labor_hours']))
+                    labor_rate=st.number_input('每小時工資',min_value=0.0,value=number(item['labor_rate']))
+                diagnosis=st.text_area('故障診斷',value=safe_str(item['diagnosis']))
+                action=st.text_area('維修處置',value=safe_str(item['repair_action']))
+                parts=st.text_area('更換零件',value=safe_str(item['parts']))
+                resolution=st.text_area('測試 / 客戶驗收紀錄',value=safe_str(item['resolution']))
+                st.metric('本次維修費用合計',f'{parts_cost+labor_hours*labor_rate:,.0f}')
+                saved=st.form_submit_button('💾 儲存維修紀錄',type='primary')
+            if saved:
+                updates=dict(status=status,priority=priority_new,engineer=engineer_new.strip(),warranty=warranty_new,parts_cost=parts_cost,labor_hours=labor_hours,labor_rate=labor_rate,total_cost=parts_cost+labor_hours*labor_rate,diagnosis=diagnosis,repair_action=action,parts=parts,resolution=resolution,updated_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                if status=='已結案' and not safe_str(item['closed_at']): updates['closed_at']=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                if status!='已結案': updates['closed_at']=''
+                for k,v in updates.items(): df.at[idx,k]=v
+                save_tickets(df)
+
+with dashboard_tab:
+    st.subheader('售服管理 KPI')
+    total=len(df); closed=int((df['status']=='已結案').sum()); active=total-closed; urgent=int(df['priority'].isin(['急件','緊急']).sum())
+    a,b,c,d=st.columns(4)
+    a.metric('累計報修',total); b.metric('處理中',active); c.metric('已結案',closed); d.metric('急件 / 緊急',urgent)
+    st.markdown('#### 維修狀態分布')
+    st.bar_chart(df['status'].value_counts().reindex(STATUSES,fill_value=0))
+    st.markdown('#### 工程師工單數')
+    if not df.empty:
+        st.bar_chart(df['engineer'].replace('', '未指派').fillna('未指派').value_counts())
+    st.metric('累計維修費用',f'{pd.to_numeric(df["total_cost"],errors="coerce").fillna(0).sum():,.0f}')
+
+with history_tab:
+    st.subheader('維修紀錄查詢 / 匯出')
+    st.dataframe(df.sort_values('created_at',ascending=False),hide_index=True,use_container_width=True)
+    st.download_button('⬇️ 匯出維修工單 CSV',data=df.to_csv(index=False).encode('utf-8-sig'),file_name='service_tickets.csv',mime='text/csv')
+
+with st.expander('⚙️ Google Sheets 工作表設定'):
+    st.write(f'請在與 aa.py 相同的 Google Spreadsheet 中新增工作表 **{SHEET}**，第一列依序建立以下欄位：')
+    st.code(','.join(COLUMNS))
+    st.caption('讀取快取 TTL 為 300 秒；寫入後清除 Streamlit 資料快取。')
