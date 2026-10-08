@@ -69,7 +69,9 @@ def read_tickets():
         for c in COLUMNS:
             if c not in data.columns:
                 data[c] = ''
-        return data[COLUMNS].copy()
+        # Google Sheets 讀取時 pandas 可能把空白欄推斷成 float64。
+        # 後續需要同欄存文字/日期/數字，先轉為 object 避免 LossySetitemError。
+        return data[COLUMNS].copy().astype(object)
     except Exception as exc:
         st.error(f'無法讀取 {SHEET} 工作表。請檢查試算表網址、ServiceTickets 分頁及服務帳號的共用權限。')
         st.exception(exc)
@@ -77,7 +79,8 @@ def read_tickets():
 
 def save_tickets(data):
     try:
-        conn.update(spreadsheet=SPREADSHEET_URL, worksheet=SHEET, data=data[COLUMNS].fillna(''))
+        data = data[COLUMNS].copy().astype(object)
+        conn.update(spreadsheet=SPREADSHEET_URL, worksheet=SHEET, data=data.fillna(''))
         st.cache_data.clear()
         st.success('資料已儲存')
         st.rerun()
@@ -569,6 +572,12 @@ with form_tab:
                 updates[f'part_{n}_name']=name.strip()
                 updates[f'part_{n}_price']=price
                 updates[f'part_{n}_qty']=qty
+            # 同時處理舊資料的數值欄與新增文字欄，避免 pandas 3 嚴格型別寫入失敗。
+            for key in updates:
+                if key not in df.columns:
+                    df[key] = pd.Series('', index=df.index, dtype=object)
+                elif df[key].dtype != object:
+                    df[key] = df[key].astype(object)
             for key,val in updates.items():
                 df.at[form_idx,key]=val
             save_tickets(df)
