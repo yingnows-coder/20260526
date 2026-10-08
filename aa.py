@@ -69,14 +69,28 @@ with header_title:
 # 2. BB 頁面
 # =========================================================
 
-top1, top2 = st.columns([8, 1])
+# cc.py 獨立部署於 Streamlit Community Cloud 後，將網址填入此處。
+# 例如：https://your-service-app.streamlit.app/
+SERVICE_APP_URL = ""
 
-with top2:
+nav_spacer, nav_trello, nav_service = st.columns([5, 2.5, 2.5])
 
+with nav_trello:
     st.link_button(
         "📋 雲端 Trello 管理系統",
-        "https://aazzyybb.streamlit.app/"
+        "https://aazzyybb.streamlit.app/",
+        use_container_width=True,
     )
+
+with nav_service:
+    if SERVICE_APP_URL.startswith(("https://", "http://")):
+        st.link_button(
+            "🛠️ 售服維修管理系統",
+            SERVICE_APP_URL,
+            use_container_width=True,
+        )
+    else:
+        st.caption("🛠️ 售服維修管理系統：請先設定獨立網址")
 
 
 # =========================================================
