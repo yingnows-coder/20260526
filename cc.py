@@ -122,7 +122,8 @@ def signature_from_drawing(drawing, width=340, height=170):
         drawing = json.loads(drawing)
     if not isinstance(drawing, dict):
         raise ValueError('簽名資料格式異常，請重新整理後再簽名。')
-    image = Image.new('RGB', (width, height), 'white')
+    render_width, render_height = width * 4, height * 4
+    image = Image.new('RGB', (render_width, render_height), 'white')
     pen = ImageDraw.Draw(image)
     count = 0
     for obj in drawing.get('objects', []):
@@ -188,7 +189,18 @@ def signature_from_drawing(drawing, width=340, height=170):
             count += 1
     if count == 0:
         raise ValueError('簽名元件未提供可用筆跡。可改用下方上傳簽名照片功能。')
-    output=io.BytesIO(); image.save(output,format='PNG',optimize=True)
+    # Normalize actual ink bounds into the full signature pad, avoiding
+    # device-pixel-ratio coordinate mismatches and the top-left-quarter crop.
+    ink = Image.eval(image.convert('L'), lambda v: 255-v)
+    bounds = ink.getbbox()
+    if bounds is None:
+        raise ValueError('簽名沒有可辨識的筆跡，請清除後重新簽名。')
+    cropped = image.crop((max(0,bounds[0]-5),max(0,bounds[1]-5),
+                          min(render_width,bounds[2]+5),min(render_height,bounds[3]+5)))
+    cropped.thumbnail((width-24,height-24), Image.Resampling.LANCZOS)
+    normalized = Image.new('RGB',(width,height),'white')
+    normalized.paste(cropped,((width-cropped.width)//2,(height-cropped.height)//2))
+    output=io.BytesIO(); normalized.save(output,format='PNG',optimize=True)
     encoded=base64.b64encode(output.getvalue()).decode('ascii')
     if len(encoded)>48000:
         raise ValueError('簽名資料超過 Google Sheets 限制。')
@@ -613,7 +625,7 @@ with form_tab:
         if st_canvas is None:
             st.error('尚未安裝手機簽名元件。請在 requirements.txt 加入 streamlit-drawable-canvas。')
         else:
-            st.caption('請在下方白色區域簽名。即使元件沒有回傳圖片，也會由手寫筆跡產生簽名 PNG。')
+            st.caption('請在白色區域完整簽名。系統將以手寫軌跡重建完整簽名，不再使用可能只擷取左上角的圖片。')
             # Fixed canvas pixels: keep within a typical mobile viewport.
             SIGN_PAD_WIDTH, SIGN_PAD_HEIGHT = 340, 170
             st.caption('簽名區：340 × 170 px（手機友善尺寸）')
@@ -642,14 +654,16 @@ with form_tab:
                             encoded = signature_from_upload(uploaded_signature)
                         else:
                             drawing = canvas.json_data or {}
-                            try:
-                                signature_image = canvas.image_data
-                            except (RuntimeError, ValueError, AttributeError):
-                                signature_image = None
-                            if signature_image is not None:
-                                encoded = signature_to_base64(signature_image)
+                            # IMPORTANT: canvas.image_data may be only the top-left quarter
+                            # on high-DPI mobile displays (devicePixelRatio=2). Rebuild
+                            # from Fabric vector strokes, not from its clipped raster.
+                            if drawing.get('objects'):
+                                encoded = signature_from_drawing(
+                                    drawing, width=SIGN_PAD_WIDTH, height=SIGN_PAD_HEIGHT
+                                )
                             else:
-                                encoded = signature_from_drawing(drawing, width=SIGN_PAD_WIDTH, height=SIGN_PAD_HEIGHT)
+                                st.error('尚未偵測到簽名筆跡，請重新簽名。')
+                                st.stop()
                         df.at[selected_idx, 'customer_signature'] = encoded
                         df.at[selected_idx, 'signed_by'] = signer.strip()
                         df.at[selected_idx, 'signed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
