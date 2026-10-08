@@ -210,35 +210,34 @@ def signature_from_upload(uploaded):
 
 
 def make_ticket_pdf(ticket):
-    """維修服務單 PDF，含簽名及中文欄位。"""
-    font_path = next((path for path in [
-        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-        '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
-        '/usr/share/fonts/opentype/noto/NotoSansCJKtc-Regular.otf',
-    ] if __import__('os').path.exists(path)), None)
-    if font_path:
-        try:
-            pdfmetrics.registerFont(TTFont('JWChinese', font_path, subfontIndex=0))
-            font_name = 'JWChinese'
-        except Exception:
-            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-            pdfmetrics.registerFont(UnicodeCIDFont('MSung-Light'))
-            font_name = 'MSung-Light'
-    else:
-        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-        pdfmetrics.registerFont(UnicodeCIDFont('MSung-Light'))
-        font_name = 'MSung-Light'
+    """A4 單頁維修單：內容完整、簽名固定框、依內容自動縮放。"""
+    from reportlab.pdfgen import canvas as pdf_canvas
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.platypus import Paragraph
+    from reportlab.lib.styles import ParagraphStyle
+
+    font_name = 'MSung-Light'
+    pdfmetrics.registerFont(UnicodeCIDFont(font_name))
     output = io.BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=(210*mm, 297*mm),
-                            rightMargin=17*mm, leftMargin=17*mm,
-                            topMargin=16*mm, bottomMargin=16*mm)
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='JWTitle', fontName=font_name, fontSize=17, leading=25, alignment=TA_CENTER, spaceAfter=12))
-    styles.add(ParagraphStyle(name='JWCell', fontName=font_name, fontSize=9, leading=15, wordWrap='CJK'))
-    styles.add(ParagraphStyle(name='JWSmall', fontName=font_name, fontSize=8, leading=12))
-    def para(value):
-        return Paragraph(escape(safe_str(value)).replace('\\n','<br/>'), styles['JWCell'])
-    story = [Paragraph('JENN-WEI 震唯機械｜售服維修服務單', styles['JWTitle'])]
+    page_w, page_h = A4
+    margin = 15 * mm
+    usable_w = page_w - 2 * margin
+    label_w = 35 * mm
+    body_style = ParagraphStyle('BodyJW', fontName=font_name, fontSize=9, leading=13,
+                                wordWrap='CJK', textColor=colors.HexColor('#233449'))
+    label_style = ParagraphStyle('LabelJW', parent=body_style, fontSize=8.5,
+                                 textColor=colors.HexColor('#526174'))
+
+    def clean(key):
+        return escape(safe_str(ticket.get(key, ''))).replace('\n', '<br/>')
+
+    def paragraph(value, style, width):
+        item = Paragraph(value or ' ', style)
+        _, h = item.wrap(width, 100000)
+        return item, h
+
     fields = [
         ('維修單號', 'ticket_id'), ('建立日期', 'created_at'),
         ('客戶名稱', 'customer'), ('聯絡人', 'contact'),
@@ -253,79 +252,93 @@ def make_ticket_pdf(ticket):
         ('每小時工資', 'labor_rate'), ('維修費用合計', 'total_cost'),
         ('結案日期', 'closed_at')
     ]
-    rows = [[para(label), para(ticket.get(key, ''))] for label, key in fields]
-    table = Table(rows, colWidths=[38*mm, 136*mm], hAlign='LEFT')
-    table.setStyle(TableStyle([
-        ('FONTNAME', (0,0),(-1,-1),font_name),
-        ('VALIGN', (0,0),(-1,-1),'TOP'),
-        ('BACKGROUND',(0,0),(0,-1),colors.HexColor('#EDF2F8')),
-        ('GRID',(0,0),(-1,-1),0.35,colors.HexColor('#D6DEE8')),
-        ('LEFTPADDING',(0,0),(-1,-1),8),
-        ('RIGHTPADDING',(0,0),(-1,-1),8),
-        ('TOPPADDING',(0,0),(-1,-1),5),
-        ('BOTTOMPADDING',(0,0),(-1,-1),5),
-    ]))
-    story += [table, Spacer(1, 10*mm)]
-    signed_by = safe_str(ticket.get('signed_by',''))
-    signed_at = safe_str(ticket.get('signed_at',''))
-    signature = safe_str(ticket.get('customer_signature',''))
-    # 固定尺寸的簽名框：先裁掉圖片四周空白，再等比例置中繪製。
-    # 避免簽名筆跡因手機畫布原始座標而偏到右邊或超出框線。
-    from reportlab.lib.utils import ImageReader
+    # 預先測量所有文字高度，避免 PDF 產生第二頁或截斷欄位內容。
+    rows = []
+    for label, key in fields:
+        lp, lh = paragraph(escape(label), label_style, label_w - 8)
+        vp, vh = paragraph(clean(key), body_style, usable_w - label_w - 14)
+        height = max(lh, vh) + 9
+        rows.append((lp, vp, height))
 
-    class CenteredSignatureBox(Flowable):
-        def __init__(self, signature_b64, width=174*mm, height=37*mm):
-            super().__init__()
-            self.width = width
-            self.height = height
-            self.signature_b64 = signature_b64
+    title_h = 42
+    sign_title_h = 23
+    sign_box_h = 43 * mm
+    footer_h = 54
+    natural_h = title_h + sum(row[2] for row in rows) + 12 + sign_title_h + sign_box_h + footer_h
+    available_h = page_h - 2 * margin
+    scale = min(1.0, available_h / natural_h)
 
-        def draw(self):
-            c = self.canv
-            c.saveState()
-            c.setStrokeColor(colors.HexColor('#5A6776'))
-            c.setLineWidth(0.8)
-            c.roundRect(0, 0, self.width, self.height, 2*mm, stroke=1, fill=0)
-            c.setFont(font_name, 9)
-            c.setFillColor(colors.HexColor('#344054'))
-            c.drawString(4*mm, self.height-7*mm, '客戶簽名：')
-            if self.signature_b64:
-                try:
-                    source = Image.open(io.BytesIO(base64.b64decode(self.signature_b64))).convert('RGB')
-                    # 只保留深色筆跡；忽略白色畫布與淺色背景。
-                    gray = source.convert('L')
-                    ink = gray.point(lambda v: 255 if v < 185 else 0)
-                    bbox = ink.getbbox()
-                    if bbox:
-                        left, top, right, bottom = bbox
-                        margin = 3
-                        source = source.crop((max(0,left-margin), max(0,top-margin),
-                                              min(source.width,right+margin), min(source.height,bottom+margin)))
-                        max_w = self.width - 30*mm
-                        max_h = self.height - 14*mm
-                        scale = min(max_w/source.width, max_h/source.height)
-                        draw_w, draw_h = source.width*scale, source.height*scale
-                        # 在框內簽名區水平、垂直置中。
-                        x = (self.width - draw_w)/2
-                        y = (self.height - draw_h)/2 - 2*mm
-                        c.drawImage(ImageReader(source), x, y, width=draw_w, height=draw_h,
-                                    mask='auto', preserveAspectRatio=True)
-                except Exception:
-                    c.setFont(font_name, 8)
-                    c.drawCentredString(self.width/2, self.height/2, '簽名圖片無法顯示')
-            c.restoreState()
+    pdf = pdf_canvas.Canvas(output, pagesize=A4)
+    pdf.setTitle('JENN-WEI 售服維修服務單')
+    pdf.saveState()
+    # 只縮放內容、不分頁。居中於 A4 可用區域。
+    x_origin = (page_w - usable_w * scale) / 2
+    top_origin = (page_h + natural_h * scale) / 2
+    pdf.translate(x_origin, top_origin)
+    pdf.scale(scale, scale)
+    y = 0
 
-    sign_items = [
-        Paragraph('客戶簽收／驗收確認', styles['JWCell']),
-        Spacer(1, 2*mm),
-        CenteredSignatureBox(signature),
-        Spacer(1, 3*mm),
-        Paragraph(f'簽收人：{escape(signed_by)}　簽收時間：{escape(signed_at)}', styles['JWSmall']),
-        Spacer(1, 2*mm),
-        Paragraph('本單據記錄現場維修及簽收資訊，簽收不代表另行承諾保固或費用條件。', styles['JWSmall'])
-    ]
-    story.append(KeepTogether(sign_items))
-    doc.build(story)
+    pdf.setFont(font_name, 16)
+    pdf.setFillColor(colors.HexColor('#193454'))
+    pdf.drawCentredString(usable_w / 2, y - 21, 'JENN-WEI 震唯機械｜售服維修服務單')
+    y -= title_h
+    for i, (lp, vp, height) in enumerate(rows):
+        pdf.setStrokeColor(colors.HexColor('#D7E0E9'))
+        pdf.setLineWidth(0.4)
+        pdf.setFillColor(colors.HexColor('#F0F4F8'))
+        pdf.rect(0, y - height, label_w, height, stroke=0, fill=1)
+        pdf.line(0, y - height, usable_w, y - height)
+        lp.drawOn(pdf, 5, y - 5 - lp.height)
+        vp.drawOn(pdf, label_w + 7, y - 5 - vp.height)
+        y -= height
+
+    y -= 12
+    pdf.setFont(font_name, 10)
+    pdf.setFillColor(colors.HexColor('#193454'))
+    pdf.drawString(0, y - 13, '客戶簽收／驗收確認')
+    y -= sign_title_h
+
+    # 簽名框：固定區域、保留內距，筆跡裁白後等比例置中。
+    box_y = y - sign_box_h
+    pdf.setStrokeColor(colors.HexColor('#5D6F82'))
+    pdf.setLineWidth(0.8)
+    pdf.roundRect(0, box_y, usable_w, sign_box_h, 6, stroke=1, fill=0)
+    pdf.setFont(font_name, 9)
+    pdf.setFillColor(colors.HexColor('#40556A'))
+    pdf.drawString(7*mm, y - 9*mm, '客戶簽名：')
+    encoded = safe_str(ticket.get('customer_signature', ''))
+    if encoded:
+        try:
+            source = Image.open(io.BytesIO(base64.b64decode(encoded))).convert('RGB')
+            gray = source.convert('L')
+            ink = gray.point(lambda v: 255 if v < 210 else 0)
+            bbox = ink.getbbox()
+            if bbox:
+                l, t, r, b = bbox
+                source = source.crop((max(0, l-4), max(0, t-4),
+                                      min(source.width, r+4), min(source.height, b+4)))
+                max_w = usable_w - 28*mm
+                max_h = sign_box_h - 18*mm
+                factor = min(max_w/source.width, max_h/source.height)
+                w, h = source.width*factor, source.height*factor
+                # 以框線下方的有效簽名區為中心，不會蓋住「客戶簽名」標籤。
+                center_y = box_y + (sign_box_h - 9*mm)/2
+                pdf.drawImage(ImageReader(source), (usable_w-w)/2, center_y-h/2,
+                              width=w, height=h, mask='auto')
+        except Exception:
+            pdf.setFont(font_name, 8)
+            pdf.drawCentredString(usable_w/2, box_y + sign_box_h/2, '簽名圖片無法顯示')
+    y = box_y - 10*mm
+    signed_by = escape(safe_str(ticket.get('signed_by', '')))
+    signed_at = escape(safe_str(ticket.get('signed_at', '')))
+    info, info_h = paragraph(f'簽收人：{signed_by}　　簽收時間：{signed_at}', body_style, usable_w)
+    info.drawOn(pdf, 0, y - info_h)
+    y -= info_h + 4*mm
+    note, note_h = paragraph('本單據記錄現場維修及簽收資訊，簽收不代表另行承諾保固或費用條件。', label_style, usable_w)
+    note.drawOn(pdf, 0, y - note_h)
+    pdf.restoreState()
+    pdf.showPage()
+    pdf.save()
     return output.getvalue()
 
 
