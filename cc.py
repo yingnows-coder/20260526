@@ -7,7 +7,14 @@ import uuid
 st.set_page_config(page_title='JENN-WEI 售服維修管理系統', page_icon='🛠️', layout='wide')
 st.title('🛠️ JENN-WEI 售服維修管理系統')
 st.caption('Service Management | 報修、派工、維修、驗收與售服績效')
-st.link_button('📋 RFQ 詢價追蹤系統', 'https://aazzyybb.streamlit.app/', disabled=True) if False else None
+# aa.py 獨立部署網址
+AA_APP_URL = "https://aazzyyii.streamlit.app/"
+BB_APP_URL = "https://aazzyybb.streamlit.app/"
+nav_aa, nav_bb, nav_space = st.columns([1.5, 1.5, 4])
+with nav_aa:
+    st.link_button("📋 返回 RFQ 詢價管理（aa.py）", AA_APP_URL or "https://share.streamlit.io/", disabled=not AA_APP_URL, use_container_width=True)
+with nav_bb:
+    st.link_button("📊 返回 Trello 任務管理（bb.py）", BB_APP_URL, use_container_width=True)
 
 SHEET = 'ServiceTickets'
 COLUMNS = ['ticket_id','created_at','customer','contact','phone','machine_model','serial_number','warranty','issue','priority','status','engineer','scheduled_date','diagnosis','repair_action','parts','parts_cost','labor_hours','labor_rate','total_cost','resolution','closed_at','updated_at']
