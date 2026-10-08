@@ -6,7 +6,7 @@ import uuid
 import io
 import base64
 from PIL import Image, ImageDraw
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as PDFImage, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as PDFImage, KeepTogether, Flowable
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
@@ -269,19 +269,61 @@ def make_ticket_pdf(ticket):
     signed_by = safe_str(ticket.get('signed_by',''))
     signed_at = safe_str(ticket.get('signed_at',''))
     signature = safe_str(ticket.get('customer_signature',''))
-    sign_items = [Paragraph('客戶簽收／驗收確認', styles['JWCell'])]
-    if signature:
-        try:
-            sign_image = PDFImage(io.BytesIO(base64.b64decode(signature)))
-            sign_image.drawWidth = 65*mm
-            sign_image.drawHeight = 22*mm
-            sign_items.append(sign_image)
-        except Exception:
-            sign_items.append(Paragraph('簽名圖片無法載入', styles['JWSmall']))
-    else:
-        sign_items.append(Spacer(1, 22*mm))
-    sign_items.append(Paragraph(f'簽收人：{escape(signed_by)}　簽收時間：{escape(signed_at)}', styles['JWSmall']))
-    sign_items.append(Paragraph('本單據記錄現場維修及簽收資訊，簽收不代表另行承諾保固或費用條件。', styles['JWSmall']))
+    # 固定尺寸的簽名框：先裁掉圖片四周空白，再等比例置中繪製。
+    # 避免簽名筆跡因手機畫布原始座標而偏到右邊或超出框線。
+    from reportlab.lib.utils import ImageReader
+
+    class CenteredSignatureBox(Flowable):
+        def __init__(self, signature_b64, width=174*mm, height=37*mm):
+            super().__init__()
+            self.width = width
+            self.height = height
+            self.signature_b64 = signature_b64
+
+        def draw(self):
+            c = self.canv
+            c.saveState()
+            c.setStrokeColor(colors.HexColor('#5A6776'))
+            c.setLineWidth(0.8)
+            c.roundRect(0, 0, self.width, self.height, 2*mm, stroke=1, fill=0)
+            c.setFont(font_name, 9)
+            c.setFillColor(colors.HexColor('#344054'))
+            c.drawString(4*mm, self.height-7*mm, '客戶簽名：')
+            if self.signature_b64:
+                try:
+                    source = Image.open(io.BytesIO(base64.b64decode(self.signature_b64))).convert('RGB')
+                    # 只保留深色筆跡；忽略白色畫布與淺色背景。
+                    gray = source.convert('L')
+                    ink = gray.point(lambda v: 255 if v < 185 else 0)
+                    bbox = ink.getbbox()
+                    if bbox:
+                        left, top, right, bottom = bbox
+                        margin = 3
+                        source = source.crop((max(0,left-margin), max(0,top-margin),
+                                              min(source.width,right+margin), min(source.height,bottom+margin)))
+                        max_w = self.width - 30*mm
+                        max_h = self.height - 14*mm
+                        scale = min(max_w/source.width, max_h/source.height)
+                        draw_w, draw_h = source.width*scale, source.height*scale
+                        # 在框內簽名區水平、垂直置中。
+                        x = (self.width - draw_w)/2
+                        y = (self.height - draw_h)/2 - 2*mm
+                        c.drawImage(ImageReader(source), x, y, width=draw_w, height=draw_h,
+                                    mask='auto', preserveAspectRatio=True)
+                except Exception:
+                    c.setFont(font_name, 8)
+                    c.drawCentredString(self.width/2, self.height/2, '簽名圖片無法顯示')
+            c.restoreState()
+
+    sign_items = [
+        Paragraph('客戶簽收／驗收確認', styles['JWCell']),
+        Spacer(1, 2*mm),
+        CenteredSignatureBox(signature),
+        Spacer(1, 3*mm),
+        Paragraph(f'簽收人：{escape(signed_by)}　簽收時間：{escape(signed_at)}', styles['JWSmall']),
+        Spacer(1, 2*mm),
+        Paragraph('本單據記錄現場維修及簽收資訊，簽收不代表另行承諾保固或費用條件。', styles['JWSmall'])
+    ]
     story.append(KeepTogether(sign_items))
     doc.build(story)
     return output.getvalue()
