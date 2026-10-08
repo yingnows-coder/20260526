@@ -5,7 +5,7 @@ from datetime import datetime, date
 import uuid
 import io
 import base64
-from PIL import Image
+from PIL import Image, ImageDraw
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as PDFImage, KeepTogether
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -108,6 +108,67 @@ def signature_to_base64(canvas_data):
     encoded = base64.b64encode(output.getvalue()).decode('ascii')
     if len(encoded) > 48000:
         raise ValueError('簽名圖片超過 Google Sheets 單格限制，請清除後簡化簽名。')
+    return encoded
+
+
+def signature_from_drawing(drawing, width=550, height=190):
+    """從 Fabric.js 路徑資料重建簽名，無需依賴 canvas.image_data。"""
+    canvas = Image.new('RGB', (width, height), 'white')
+    pen = ImageDraw.Draw(canvas)
+    rendered = False
+    for obj in drawing.get('objects', []):
+        if obj.get('type') != 'path':
+            continue
+        commands = obj.get('path', [])
+        if not commands:
+            continue
+        offset = obj.get('pathOffset') or {}
+        ox, oy = float(offset.get('x', 0)), float(offset.get('y', 0))
+        left, top = float(obj.get('left', 0)), float(obj.get('top', 0))
+        sx, sy = float(obj.get('scaleX', 1)), float(obj.get('scaleY', 1))
+        stroke_width = max(2, round(float(obj.get('strokeWidth', 3)) * max(sx, sy)))
+        def pos(x, y):
+            return (left + (float(x) - ox) * sx, top + (float(y) - oy) * sy)
+        previous = None
+        for command in commands:
+            kind = str(command[0]).upper()
+            args = command[1:]
+            if kind == 'M' and len(args) >= 2:
+                previous = pos(args[0], args[1])
+                pen.ellipse((previous[0]-1, previous[1]-1, previous[0]+1, previous[1]+1), fill='black')
+                rendered = True
+            elif kind == 'L' and len(args) >= 2 and previous is not None:
+                point = pos(args[0], args[1])
+                pen.line([previous, point], fill='black', width=stroke_width, joint='curve')
+                previous = point
+                rendered = True
+            elif kind == 'Q' and len(args) >= 4 and previous is not None:
+                control = pos(args[0], args[1]); end = pos(args[2], args[3])
+                points = []
+                for i in range(21):
+                    t = i / 20
+                    points.append(((1-t)**2*previous[0]+2*(1-t)*t*control[0]+t*t*end[0],
+                                   (1-t)**2*previous[1]+2*(1-t)*t*control[1]+t*t*end[1]))
+                pen.line(points, fill='black', width=stroke_width, joint='curve')
+                previous = end
+                rendered = True
+            elif kind == 'C' and len(args) >= 6 and previous is not None:
+                c1 = pos(args[0], args[1]); c2 = pos(args[2], args[3]); end = pos(args[4], args[5])
+                points = []
+                for i in range(21):
+                    t = i / 20
+                    points.append(((1-t)**3*previous[0]+3*(1-t)**2*t*c1[0]+3*(1-t)*t*t*c2[0]+t**3*end[0],
+                                   (1-t)**3*previous[1]+3*(1-t)**2*t*c1[1]+3*(1-t)*t*t*c2[1]+t**3*end[1]))
+                pen.line(points, fill='black', width=stroke_width, joint='curve')
+                previous = end
+                rendered = True
+    if not rendered:
+        raise ValueError('沒有可辨識的手寫筆跡，請清除後重新簽名。')
+    output = io.BytesIO()
+    canvas.save(output, format='PNG', optimize=True)
+    encoded = base64.b64encode(output.getvalue()).decode('ascii')
+    if len(encoded) > 48000:
+        raise ValueError('簽名資料過大，請清除後重新簽名。')
     return encoded
 
 
@@ -304,7 +365,7 @@ with signature_tab:
         if st_canvas is None:
             st.error('尚未安裝手機簽名元件。請在 requirements.txt 加入 streamlit-drawable-canvas。')
         else:
-            st.caption('請在下方白色區域簽名。需要重簽時請按畫布的清除鍵。')
+            st.caption('請在下方白色區域簽名。即使元件沒有回傳圖片，也會由手寫筆跡產生簽名 PNG。')
             canvas = st_canvas(
                 fill_color='rgba(255,255,255,0)',
                 stroke_width=3,
@@ -332,8 +393,9 @@ with signature_tab:
                                 signature_image = canvas.image_data
                             except (RuntimeError, ValueError, AttributeError):
                                 signature_image = None
+                            # 新版 Streamlit 可能不回傳 image_data；改從筆跡路徑重建 PNG。
                             if signature_image is None:
-                                st.warning('簽名元件尚未回傳圖片。請在畫布重新簽名後再試；若持續發生，可能是此元件與目前 Streamlit 版本不相容。')
+                                encoded = signature_from_drawing(drawing)
                             else:
                                 encoded = signature_to_base64(signature_image)
                                 df.at[selected_idx, 'customer_signature'] = encoded
