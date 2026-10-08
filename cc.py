@@ -21,6 +21,7 @@ except ImportError:
     st_canvas = None
 
 SIGNATURE_COLUMNS = ['customer_signature', 'signed_by', 'signed_at']
+FORM_COLUMNS = ['address', 'manufacture_date', 'arrival_time', 'departure_time', 'is_completed', 'next_service_date', 'next_service_hours', 'service_fee', 'tax_amount', 'service_supervisor', 'sales_supervisor', 'part_1_name', 'part_1_price', 'part_1_qty', 'part_2_name', 'part_2_price', 'part_2_qty', 'part_3_name', 'part_3_price', 'part_3_qty', 'part_4_name', 'part_4_price', 'part_4_qty', 'part_5_name', 'part_5_price', 'part_5_qty', 'part_6_name', 'part_6_price', 'part_6_qty', 'part_7_name', 'part_7_price', 'part_7_qty', 'part_8_name', 'part_8_price', 'part_8_qty', 'part_9_name', 'part_9_price', 'part_9_qty', 'part_10_name', 'part_10_price', 'part_10_qty']
 
 st.set_page_config(page_title='JENN-WEI 售服維修管理系統', page_icon='🛠️', layout='wide')
 st.title('🛠️ JENN-WEI 售服維修管理系統')
@@ -35,7 +36,7 @@ with nav_bb:
     st.link_button("📊 返回 Trello 任務管理", BB_APP_URL, use_container_width=True)
 
 SHEET = 'ServiceTickets'
-COLUMNS = ['ticket_id','created_at','customer','contact','phone','machine_model','serial_number','warranty','issue','priority','status','engineer','scheduled_date','diagnosis','repair_action','parts','parts_cost','labor_hours','labor_rate','total_cost','resolution','closed_at','updated_at'] + SIGNATURE_COLUMNS
+COLUMNS = ['ticket_id','created_at','customer','contact','phone','machine_model','serial_number','warranty','issue','priority','status','engineer','scheduled_date','diagnosis','repair_action','parts','parts_cost','labor_hours','labor_rate','total_cost','resolution','closed_at','updated_at'] + SIGNATURE_COLUMNS + FORM_COLUMNS
 STATUSES = ['新報修','待確認','待派工','待零件','維修中','待驗收','已結案']
 PRIORITIES = ['一般','急件','緊急']
 # cc.py 是獨立部署的 App，必須在此 App 的 Secrets 指定試算表。
@@ -327,10 +328,10 @@ def make_ticket_pdf(ticket):
     y-=10*mm
     cell(x0,y,W*.30,10*mm,'到達時間：',value('arrival_time'))
     cell(x0+W*.30,y,W*.30,10*mm,'離開時間：',value('departure_time'))
-    cell(x0+W*.60,y,W*.40,10*mm,'本案是否完成：', '是' if value('status')=='已結案' else '待確認',33*mm)
+    cell(x0+W*.60,y,W*.40,10*mm,'本案是否完成：', '是' if (value('is_completed') == '是' or (not value('is_completed') and value('status')=='已結案')) else '待確認',33*mm)
     y-=10*mm
-    cell(x0,y,W,10*mm,'未處理完成、再處理日期：',value('scheduled_date'))
-
+    cell(x0,y,W*.76,10*mm,'未處理完成、再處理日期：',value('next_service_date') or value('scheduled_date'))
+    cell(x0+W*.76,y,W*.24,10*mm,'時 間：',value('next_service_hours'),17*mm)
     # 零件費用明細，與原始紙本的 10 列一致
     parts_h=6.4*mm
     y-=parts_h
@@ -342,27 +343,38 @@ def make_ticket_pdf(ticket):
         c.setFont(font,8)
         c.drawCentredString(cursor+W*frac/2,y+2*mm,head)
         cursor+=W*frac
-    part_lines=[p.strip() for p in value('parts').replace('；','\n').replace(';','\n').splitlines() if p.strip()]
-    for i in range(10):
+    legacy_parts=[p.strip() for p in value('parts').replace('；','\\n').replace(';','\\n').splitlines() if p.strip()]
+    parts_total=0.0
+    for i in range(1,11):
         y-=parts_h
         cursor=x0
-        values=[f'{i+1}. '+(part_lines[i] if i<len(part_lines) else ''),'','','']
+        name=value(f'part_{i}_name') or (legacy_parts[i-1] if i<=len(legacy_parts) else '')
+        price=number(ticket.get(f'part_{i}_price',''))
+        qty=number(ticket.get(f'part_{i}_qty',''))
+        subtotal=price*qty
+        parts_total+=subtotal
+        values=[f'{i}. {name}', f'{price:,.2f}' if name and price else '',
+                f'{qty:g}' if name and qty else '',
+                f'{subtotal:,.2f}' if name and price and qty else '']
         for frac,entry in zip(fractions,values):
             box(cursor,y,W*frac,parts_h)
             if entry:
-                txt(cursor+3,y+2*mm,entry[:55],7)
+                txt(cursor+3,y+2*mm,entry[:46],7)
             cursor+=W*frac
 
     y-=10*mm
-    cell(x0,y,W*.34,10*mm,'服務費：',value('labor_hours'))
-    cell(x0+W*.34,y,W*.30,10*mm,'5% 稅金：','')
-    cell(x0+W*.64,y,W*.36,10*mm,'費用總計：',value('total_cost'))
+    service_fee=number(ticket.get('service_fee',''))
+    tax=number(ticket.get('tax_amount',''))
+    total=parts_total+service_fee+tax
+    cell(x0,y,W*.34,10*mm,'服務費：',f'{service_fee:,.2f}' if service_fee else '0')
+    cell(x0+W*.34,y,W*.30,10*mm,'5% 稅金：',f'{tax:,.2f}' if tax else '0')
+    cell(x0+W*.64,y,W*.36,10*mm,'費用總計：',f'{total:,.2f}')
 
     # 保留簽名框在同一頁；姓名/時間與筆跡不重疊
     y-=11*mm
     cell(x0,y,W*.33,11*mm,'服務人員：',value('engineer'))
-    cell(x0+W*.33,y,W*.33,11*mm,'售服主管：','')
-    cell(x0+W*.66,y,W*.34,11*mm,'業務主管：','')
+    cell(x0+W*.33,y,W*.33,11*mm,'售服主管：',value('service_supervisor'))
+    cell(x0+W*.66,y,W*.34,11*mm,'業務主管：',value('sales_supervisor'))
     sign_h=24*mm
     y-=sign_h
     box(x0,y,W,sign_h)
@@ -391,7 +403,7 @@ def make_ticket_pdf(ticket):
 
 df = read_tickets()
 
-new_tab, manage_tab, dashboard_tab, history_tab, signature_tab = st.tabs(['📝 建立報修單','🔧 維修工單管理','📊 售服 KPI','📚 維修紀錄','✍️ 客戶簽名／PDF'])
+new_tab, manage_tab, form_tab, dashboard_tab, history_tab, signature_tab = st.tabs(['📝 建立報修單','🔧 維修工單管理','📄 售後服務單填寫','📊 售服 KPI','📚 維修紀錄','✍️ 客戶簽名／PDF'])
 with new_tab:
     st.subheader('建立客戶報修工單')
     with st.form('new_service_ticket', clear_on_submit=True):
@@ -408,6 +420,9 @@ with new_tab:
             priority = st.selectbox('緊急程度', PRIORITIES)
             engineer = st.text_input('預定負責工程師')
             schedule = st.date_input('預計處理日期', value=date.today())
+        st.markdown('#### 售後服務單基本資料')
+        address = st.text_input('客戶住址')
+        manufacture_date = st.text_input('機台出廠日（YYYY-MM-DD，可留空）')
         issue = st.text_area('故障現象 / 客戶反映 *')
         submitted = st.form_submit_button('➕ 建立維修工單', type='primary')
     if submitted:
@@ -416,7 +431,7 @@ with new_tab:
         else:
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ticket = {c:'' for c in COLUMNS}
-            ticket.update(ticket_id=f'SRV-{datetime.now():%Y%m%d}-{uuid.uuid4().hex[:4].upper()}',created_at=now,customer=customer.strip(),contact=contact.strip(),phone=phone.strip(),machine_model=model.strip(),serial_number=serial.strip(),warranty=warranty,issue=issue.strip(),priority=priority,status='新報修',engineer=engineer.strip(),scheduled_date=str(schedule),parts_cost=0.0,labor_hours=0.0,labor_rate=0.0,total_cost=0.0,updated_at=now)
+            ticket.update(ticket_id=f'SRV-{datetime.now():%Y%m%d}-{uuid.uuid4().hex[:4].upper()}',created_at=now,customer=customer.strip(),contact=contact.strip(),phone=phone.strip(),machine_model=model.strip(),serial_number=serial.strip(),warranty=warranty,issue=issue.strip(),priority=priority,status='新報修',engineer=engineer.strip(),scheduled_date=str(schedule),parts_cost=0.0,labor_hours=0.0,labor_rate=0.0,total_cost=0.0,updated_at=now,address=address.strip(),manufacture_date=manufacture_date.strip())
             save_tickets(pd.concat([df,pd.DataFrame([ticket])],ignore_index=True))
 
 with manage_tab:
@@ -463,6 +478,100 @@ with manage_tab:
                 if status!='已結案': updates['closed_at']=''
                 for k,v in updates.items(): df.at[idx,k]=v
                 save_tickets(df)
+
+with form_tab:
+    st.subheader('📄 售後服務單 — 對應紙本欄位填寫')
+    st.caption('依紙本售後服務單順序填寫。儲存後可至「客戶簽名／PDF」下載 A4 單頁表單。')
+    if df.empty:
+        st.info('請先在「建立報修單」建立工單。')
+    else:
+        form_ticket_id = st.selectbox('選擇維修單', df['ticket_id'].astype(str).tolist(), key='form_ticket_id')
+        form_idx = df.index[df['ticket_id'].astype(str)==form_ticket_id][0]
+        item = df.loc[form_idx]
+        def old(k):
+            return safe_str(item.get(k,''))
+        with st.form('paper_service_form'):
+            st.markdown('#### 1. 客戶及機台資料')
+            a,b,c = st.columns(3)
+            with a:
+                customer_f=st.text_input('客戶名稱',value=old('customer'))
+                address_f=st.text_input('客戶住址',value=old('address'))
+                machine_f=st.text_input('機型',value=old('machine_model'))
+            with b:
+                phone_f=st.text_input('電話',value=old('phone'))
+                serial_f=st.text_input('機號',value=old('serial_number'))
+                manufactured_f=st.text_input('出廠日',value=old('manufacture_date'),placeholder='YYYY-MM-DD')
+            with c:
+                created_f=st.text_input('服務單日期',value=old('created_at')[:10],placeholder='YYYY-MM-DD')
+                engineer_f=st.text_input('服務人員',value=old('engineer'))
+            st.markdown('#### 2. 故障原因與處理方式')
+            diagnosis_f=st.text_area('故障原因',value=old('diagnosis') or old('issue'),height=110)
+            repair_f=st.text_area('處理方式',value=old('repair_action'),height=110)
+            st.markdown('#### 3. 服務時間與完工狀態')
+            a,b,c=st.columns(3)
+            with a:
+                arrival_f=st.text_input('到達時間',value=old('arrival_time'),placeholder='YYYY-MM-DD HH:MM')
+            with b:
+                departure_f=st.text_input('離開時間',value=old('departure_time'),placeholder='YYYY-MM-DD HH:MM')
+            with c:
+                completed_default=old('is_completed') or ('是' if old('status')=='已結案' else '否')
+                completed_f=st.radio('本案是否完成',options=['是','否'],index=0 if completed_default=='是' else 1,horizontal=True)
+            a,b=st.columns(2)
+            with a:
+                next_date_f=st.text_input('未完成，再處理日期',value=old('next_service_date'),placeholder='YYYY-MM-DD')
+            with b:
+                next_hours_f=st.text_input('再處理時間',value=old('next_service_hours'),placeholder='HH:MM')
+            st.markdown('#### 4. 零件名稱、單價、數量（10 筆）')
+            parts_input=[]
+            for n in range(1,11):
+                a,b,c=st.columns([5,2,2])
+                with a:
+                    name_f=st.text_input(f'{n}. 零件名稱／編號',value=old(f'part_{n}_name'),key=f'partname_{form_ticket_id}_{n}')
+                with b:
+                    price_f=st.number_input(f'{n}. 單價',min_value=0.0,value=number(item.get(f'part_{n}_price','')),step=1.0,key=f'partprice_{form_ticket_id}_{n}')
+                with c:
+                    qty_f=st.number_input(f'{n}. 數量',min_value=0.0,value=number(item.get(f'part_{n}_qty','')),step=1.0,key=f'partqty_{form_ticket_id}_{n}')
+                parts_input.append((name_f,price_f,qty_f))
+            st.markdown('#### 5. 費用與主管確認')
+            a,b,c=st.columns(3)
+            with a:
+                service_fee_f=st.number_input('服務費',min_value=0.0,value=number(item.get('service_fee','')),step=100.0)
+            with b:
+                tax_default=number(item.get('tax_amount',''))
+                tax_f=st.number_input('5% 稅金（手動填寫）',min_value=0.0,value=tax_default,step=1.0)
+            with c:
+                subtotal_f=sum(price*qty for name,price,qty in parts_input if name.strip())
+                st.metric('費用總計（零件＋服務費＋稅金）',f'{subtotal_f+service_fee_f+tax_f:,.2f}')
+            a,b=st.columns(2)
+            with a:
+                supervisor_f=st.text_input('售服主管',value=old('service_supervisor'))
+            with b:
+                sales_f=st.text_input('業務主管',value=old('sales_supervisor'))
+            saved_form=st.form_submit_button('💾 儲存售後服務單資料',type='primary',use_container_width=True)
+        if saved_form:
+            updates={
+                'customer':customer_f.strip(),'address':address_f.strip(),'phone':phone_f.strip(),
+                'machine_model':machine_f.strip(),'serial_number':serial_f.strip(),
+                'manufacture_date':manufactured_f.strip(),'engineer':engineer_f.strip(),
+                'diagnosis':diagnosis_f.strip(),'repair_action':repair_f.strip(),
+                'arrival_time':arrival_f.strip(),'departure_time':departure_f.strip(),
+                'is_completed':completed_f,'next_service_date':next_date_f.strip(),
+                'next_service_hours':next_hours_f.strip(),'service_fee':service_fee_f,
+                'tax_amount':tax_f,'service_supervisor':supervisor_f.strip(),
+                'sales_supervisor':sales_f.strip(),'parts_cost':subtotal_f,
+                'total_cost':subtotal_f+service_fee_f+tax_f,
+                'updated_at':datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            if created_f.strip():
+                original_time=old('created_at')
+                updates['created_at']=created_f.strip() + (' '+original_time.split(' ',1)[1] if ' ' in original_time else '')
+            for n,(name,price,qty) in enumerate(parts_input,1):
+                updates[f'part_{n}_name']=name.strip()
+                updates[f'part_{n}_price']=price
+                updates[f'part_{n}_qty']=qty
+            for key,val in updates.items():
+                df.at[form_idx,key]=val
+            save_tickets(df)
 
 with dashboard_tab:
     st.subheader('售服管理 KPI')
