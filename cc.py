@@ -403,7 +403,7 @@ def make_ticket_pdf(ticket):
 
 df = read_tickets()
 
-new_tab, manage_tab, form_tab, dashboard_tab, history_tab, signature_tab = st.tabs(['📝 建立報修單','🔧 維修工單管理','📄 售後服務單填寫','📊 售服 KPI','📚 維修紀錄','✍️ 客戶簽名／PDF'])
+new_tab, manage_tab, form_tab, dashboard_tab, history_tab = st.tabs(['📝 建立報修單','🔧 維修工單管理','📄 售後服務單填寫','📊 售服 KPI','📚 維修紀錄'])
 with new_tab:
     st.subheader('建立客戶報修工單')
     with st.form('new_service_ticket', clear_on_submit=True):
@@ -573,30 +573,14 @@ with form_tab:
                 df.at[form_idx,key]=val
             save_tickets(df)
 
-with dashboard_tab:
-    st.subheader('售服管理 KPI')
-    total=len(df); closed=int((df['status']=='已結案').sum()); active=total-closed; urgent=int(df['priority'].isin(['急件','緊急']).sum())
-    a,b,c,d=st.columns(4)
-    a.metric('累計報修',total); b.metric('處理中',active); c.metric('已結案',closed); d.metric('急件 / 緊急',urgent)
-    st.markdown('#### 維修狀態分布')
-    st.bar_chart(df['status'].value_counts().reindex(STATUSES,fill_value=0))
-    st.markdown('#### 工程師工單數')
-    if not df.empty:
-        st.bar_chart(df['engineer'].replace('', '未指派').fillna('未指派').value_counts())
-    st.metric('累計維修費用',f'{pd.to_numeric(df["total_cost"],errors="coerce").fillna(0).sum():,.0f}')
-
-with history_tab:
-    st.subheader('維修紀錄查詢 / 匯出')
-    st.dataframe(df.sort_values('created_at',ascending=False),hide_index=True,use_container_width=True)
-    st.download_button('⬇️ 匯出維修工單 CSV',data=df.to_csv(index=False).encode('utf-8-sig'),file_name='service_tickets.csv',mime='text/csv')
-
-with signature_tab:
+    st.divider()
+    st.markdown('### ✍️ 客戶簽名／PDF 匯出')
     st.subheader('✍️ 客戶手機簽名與維修單 PDF')
     st.caption('手機可用手指直接在簽名區書寫。簽名會儲存至同一份 Google Sheets 的 ServiceTickets 分頁。')
     if df.empty:
         st.info('請先建立維修工單。')
     else:
-        selected_id = st.selectbox('選擇維修單號', df['ticket_id'].astype(str).tolist(), key='sign_ticket')
+        selected_id = st.selectbox('選擇維修單號', df['ticket_id'].astype(str).tolist(), index=df['ticket_id'].astype(str).tolist().index(form_ticket_id), key='sign_ticket')
         selected_idx = df.index[df['ticket_id'].astype(str) == selected_id][0]
         ticket = df.loc[selected_idx]
         st.write(f'**客戶：** {safe_str(ticket["customer"])}　**機台：** {safe_str(ticket["machine_model"])}')
@@ -663,6 +647,24 @@ with signature_tab:
             use_container_width=True,
         )
         st.caption('先儲存簽名，頁面重新載入後再下載 PDF，才會包含最新簽名。')
+
+
+with dashboard_tab:
+    st.subheader('售服管理 KPI')
+    total=len(df); closed=int((df['status']=='已結案').sum()); active=total-closed; urgent=int(df['priority'].isin(['急件','緊急']).sum())
+    a,b,c,d=st.columns(4)
+    a.metric('累計報修',total); b.metric('處理中',active); c.metric('已結案',closed); d.metric('急件 / 緊急',urgent)
+    st.markdown('#### 維修狀態分布')
+    st.bar_chart(df['status'].value_counts().reindex(STATUSES,fill_value=0))
+    st.markdown('#### 工程師工單數')
+    if not df.empty:
+        st.bar_chart(df['engineer'].replace('', '未指派').fillna('未指派').value_counts())
+    st.metric('累計維修費用',f'{pd.to_numeric(df["total_cost"],errors="coerce").fillna(0).sum():,.0f}')
+
+with history_tab:
+    st.subheader('維修紀錄查詢 / 匯出')
+    st.dataframe(df.sort_values('created_at',ascending=False),hide_index=True,use_container_width=True)
+    st.download_button('⬇️ 匯出維修工單 CSV',data=df.to_csv(index=False).encode('utf-8-sig'),file_name='service_tickets.csv',mime='text/csv')
 
 with st.expander('⚙️ Google Sheets 工作表設定'):
     st.write(f'請在與 aa.py 相同的 Google Spreadsheet 中新增工作表 **{SHEET}**，第一列依序建立以下欄位：')
