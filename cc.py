@@ -13,11 +13,31 @@ SHEET = 'ServiceTickets'
 COLUMNS = ['ticket_id','created_at','customer','contact','phone','machine_model','serial_number','warranty','issue','priority','status','engineer','scheduled_date','diagnosis','repair_action','parts','parts_cost','labor_hours','labor_rate','total_cost','resolution','closed_at','updated_at']
 STATUSES = ['新報修','待確認','待派工','待零件','維修中','待驗收','已結案']
 PRIORITIES = ['一般','急件','緊急']
+# cc.py 是獨立部署的 App，必須在此 App 的 Secrets 指定試算表。
+# 建議在 Streamlit Cloud > 售服 App > Settings > Secrets 設定：
+# SERVICE_SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/你的ID/edit"
+def get_spreadsheet_url():
+    try:
+        direct = st.secrets.get("SERVICE_SPREADSHEET_URL", "")
+        if direct:
+            return str(direct).strip()
+        settings = st.secrets.get("connections", {})
+        gsheets = settings.get("gsheets", {})
+        return str(gsheets.get("spreadsheet", "") or gsheets.get("spreadsheet_url", "")).strip()
+    except Exception:
+        return ""
+
+SPREADSHEET_URL = get_spreadsheet_url()
+if not SPREADSHEET_URL:
+    st.error("尚未設定售服系統的 Google Spreadsheet 網址。")
+    st.info('請到售服 App 的 Streamlit Cloud → Settings → Secrets，新增 SERVICE_SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/你的試算表ID/edit"。並保留 gsheets 連線的服務帳號憑證。')
+    st.stop()
+
 conn = st.connection('gsheets', type=GSheetsConnection)
 
 def read_tickets():
     try:
-        data = conn.read(worksheet=SHEET, ttl=300)
+        data = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=SHEET, ttl=300)
         if data is None:
             data = pd.DataFrame()
         for c in COLUMNS:
@@ -25,13 +45,13 @@ def read_tickets():
                 data[c] = ''
         return data[COLUMNS].copy()
     except Exception as exc:
-        st.error(f'無法讀取 {SHEET} 工作表。請先在 Google Sheets 建立同名分頁，第一列填入指定欄位。')
+        st.error(f'無法讀取 {SHEET} 工作表。請檢查試算表網址、ServiceTickets 分頁及服務帳號的共用權限。')
         st.exception(exc)
         st.stop()
 
 def save_tickets(data):
     try:
-        conn.update(worksheet=SHEET, data=data[COLUMNS].fillna(''))
+        conn.update(spreadsheet=SPREADSHEET_URL, worksheet=SHEET, data=data[COLUMNS].fillna(''))
         st.cache_data.clear()
         st.success('資料已儲存')
         st.rerun()
