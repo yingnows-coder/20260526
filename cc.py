@@ -524,70 +524,110 @@ with form_tab:
                      disabled=st.session_state[count_key] >= 10):
             st.session_state[count_key] += 1
             st.rerun()
-        with st.form('paper_service_form'):
-            st.markdown('#### 1. 客戶及機台資料')
-            a,b,c = st.columns(3)
+        st.markdown('#### 1. 客戶及機台資料')
+        a,b,c = st.columns(3)
+        with a:
+            customer_f=st.text_input('客戶名稱',value=old('customer'))
+            address_f=st.text_input('客戶住址',value=old('address'))
+            machine_f=st.text_input('機型',value=old('machine_model'))
+        with b:
+            phone_f=st.text_input('電話',value=old('phone'))
+            serial_f=st.text_input('機號',value=old('serial_number'))
+            manufactured_f=st.text_input('出廠日',value=old('manufacture_date'),placeholder='YYYY-MM-DD')
+        with c:
+            created_f=st.text_input('服務單日期',value=old('created_at')[:10],placeholder='YYYY-MM-DD')
+            engineer_f=st.text_input('服務人員',value=old('engineer'))
+        st.markdown('#### 2. 故障原因與處理方式（按需追加）')
+        def split_entries(raw):
+            import re
+            text = safe_str(raw).strip()
+            if not text:
+                return []
+            # 舊版單一文字欄位沿用；新版用換行合併，PDF 也沿用這兩欄。
+            result = []
+            for line in text.splitlines():
+                line = re.sub(r'^\s*(?:\d+[.、．)]\s*)', '', line).strip()
+                if line:
+                    result.append(line)
+            return result
+
+        issue_values = split_entries(old('diagnosis') or old('issue'))
+        action_values = split_entries(old('repair_action'))
+        issue_count_key = f'issue_count_{form_ticket_id}'
+        action_count_key = f'action_count_{form_ticket_id}'
+        if issue_count_key not in st.session_state:
+            st.session_state[issue_count_key] = max(1, len(issue_values))
+        if action_count_key not in st.session_state:
+            st.session_state[action_count_key] = max(1, len(action_values))
+
+        st.markdown('**故障原因**')
+        if st.button('➕ 追加故障原因', key=f'add_issue_{form_ticket_id}'):
+            st.session_state[issue_count_key] += 1
+            st.rerun()
+        diagnosis_entries = []
+        for n in range(st.session_state[issue_count_key]):
+            value = issue_values[n] if n < len(issue_values) else ''
+            diagnosis_entries.append(st.text_area(f'故障原因 {n+1}', value=value,
+                height=80, key=f'issue_{form_ticket_id}_{n}'))
+
+        st.markdown('**處理方式**')
+        if st.button('➕ 追加處理方式', key=f'add_action_{form_ticket_id}'):
+            st.session_state[action_count_key] += 1
+            st.rerun()
+        repair_entries = []
+        for n in range(st.session_state[action_count_key]):
+            value = action_values[n] if n < len(action_values) else ''
+            repair_entries.append(st.text_area(f'處理方式 {n+1}', value=value,
+                height=80, key=f'action_{form_ticket_id}_{n}'))
+
+        st.markdown('#### 3. 服務時間與完工狀態')
+        a,b,c=st.columns(3)
+        with a:
+            arrival_f=st.text_input('到達時間',value=old('arrival_time'),placeholder='YYYY-MM-DD HH:MM')
+        with b:
+            departure_f=st.text_input('離開時間',value=old('departure_time'),placeholder='YYYY-MM-DD HH:MM')
+        with c:
+            completed_default=old('is_completed') or ('是' if old('status')=='已結案' else '否')
+            completed_f=st.radio('本案是否完成',options=['是','否'],index=0 if completed_default=='是' else 1,horizontal=True)
+        a,b=st.columns(2)
+        with a:
+            next_date_f=st.text_input('未完成，再處理日期',value=old('next_service_date'),placeholder='YYYY-MM-DD')
+        with b:
+            next_hours_f=st.text_input('再處理時間',value=old('next_service_hours'),placeholder='HH:MM')
+        st.markdown('#### 4. 零件名稱、單價、數量（按需追加）')
+        parts_input=[]
+        for n in range(1, st.session_state[count_key] + 1):
+            a,b,c=st.columns([5,2,2])
             with a:
-                customer_f=st.text_input('客戶名稱',value=old('customer'))
-                address_f=st.text_input('客戶住址',value=old('address'))
-                machine_f=st.text_input('機型',value=old('machine_model'))
+                name_f=st.text_input(f'{n}. 零件名稱／編號',value=old(f'part_{n}_name'),key=f'partname_{form_ticket_id}_{n}')
             with b:
-                phone_f=st.text_input('電話',value=old('phone'))
-                serial_f=st.text_input('機號',value=old('serial_number'))
-                manufactured_f=st.text_input('出廠日',value=old('manufacture_date'),placeholder='YYYY-MM-DD')
+                price_f=st.number_input(f'{n}. 單價',min_value=0.0,value=number(item.get(f'part_{n}_price','')),step=1.0,key=f'partprice_{form_ticket_id}_{n}')
             with c:
-                created_f=st.text_input('服務單日期',value=old('created_at')[:10],placeholder='YYYY-MM-DD')
-                engineer_f=st.text_input('服務人員',value=old('engineer'))
-            st.markdown('#### 2. 故障原因與處理方式')
-            diagnosis_f=st.text_area('故障原因',value=old('diagnosis') or old('issue'),height=110)
-            repair_f=st.text_area('處理方式',value=old('repair_action'),height=110)
-            st.markdown('#### 3. 服務時間與完工狀態')
-            a,b,c=st.columns(3)
-            with a:
-                arrival_f=st.text_input('到達時間',value=old('arrival_time'),placeholder='YYYY-MM-DD HH:MM')
-            with b:
-                departure_f=st.text_input('離開時間',value=old('departure_time'),placeholder='YYYY-MM-DD HH:MM')
-            with c:
-                completed_default=old('is_completed') or ('是' if old('status')=='已結案' else '否')
-                completed_f=st.radio('本案是否完成',options=['是','否'],index=0 if completed_default=='是' else 1,horizontal=True)
-            a,b=st.columns(2)
-            with a:
-                next_date_f=st.text_input('未完成，再處理日期',value=old('next_service_date'),placeholder='YYYY-MM-DD')
-            with b:
-                next_hours_f=st.text_input('再處理時間',value=old('next_service_hours'),placeholder='HH:MM')
-            st.markdown('#### 4. 零件名稱、單價、數量（按需追加）')
-            parts_input=[]
-            for n in range(1, st.session_state[count_key] + 1):
-                a,b,c=st.columns([5,2,2])
-                with a:
-                    name_f=st.text_input(f'{n}. 零件名稱／編號',value=old(f'part_{n}_name'),key=f'partname_{form_ticket_id}_{n}')
-                with b:
-                    price_f=st.number_input(f'{n}. 單價',min_value=0.0,value=number(item.get(f'part_{n}_price','')),step=1.0,key=f'partprice_{form_ticket_id}_{n}')
-                with c:
-                    qty_f=st.number_input(f'{n}. 數量',min_value=0.0,value=number(item.get(f'part_{n}_qty','')),step=1.0,key=f'partqty_{form_ticket_id}_{n}')
-                parts_input.append((name_f,price_f,qty_f))
-            st.markdown('#### 5. 費用與主管確認')
-            a,b,c=st.columns(3)
-            with a:
-                service_fee_f=st.number_input('服務費',min_value=0.0,value=number(item.get('service_fee','')),step=100.0)
-            with b:
-                tax_default=number(item.get('tax_amount',''))
-                tax_f=st.number_input('5% 稅金（手動填寫）',min_value=0.0,value=tax_default,step=1.0)
-            with c:
-                subtotal_f=sum(price*qty for name,price,qty in parts_input if name.strip())
-                st.metric('費用總計（零件＋服務費＋稅金）',f'{subtotal_f+service_fee_f+tax_f:,.2f}')
-            a,b=st.columns(2)
-            with a:
-                supervisor_f=st.text_input('售服主管',value=old('service_supervisor'))
-            with b:
-                sales_f=st.text_input('業務主管',value=old('sales_supervisor'))
-            saved_form=st.form_submit_button('💾 儲存售後服務單資料',type='primary',use_container_width=True)
+                qty_f=st.number_input(f'{n}. 數量',min_value=0.0,value=number(item.get(f'part_{n}_qty','')),step=1.0,key=f'partqty_{form_ticket_id}_{n}')
+            parts_input.append((name_f,price_f,qty_f))
+        st.markdown('#### 5. 費用與主管確認')
+        a,b,c=st.columns(3)
+        with a:
+            service_fee_f=st.number_input('服務費',min_value=0.0,value=number(item.get('service_fee','')),step=100.0)
+        with b:
+            tax_default=number(item.get('tax_amount',''))
+            tax_f=st.number_input('5% 稅金（手動填寫）',min_value=0.0,value=tax_default,step=1.0)
+        with c:
+            subtotal_f=sum(price*qty for name,price,qty in parts_input if name.strip())
+            st.metric('費用總計（零件＋服務費＋稅金）',f'{subtotal_f+service_fee_f+tax_f:,.2f}')
+        a,b=st.columns(2)
+        with a:
+            supervisor_f=st.text_input('售服主管',value=old('service_supervisor'))
+        with b:
+            sales_f=st.text_input('業務主管',value=old('sales_supervisor'))
+        saved_form=st.button('💾 儲存售後服務單資料',type='primary',use_container_width=True, key=f'save_paper_{form_ticket_id}')
         if saved_form:
             updates={
                 'customer':customer_f.strip(),'address':address_f.strip(),'phone':phone_f.strip(),
                 'machine_model':machine_f.strip(),'serial_number':serial_f.strip(),
                 'manufacture_date':manufactured_f.strip(),'engineer':engineer_f.strip(),
-                'diagnosis':diagnosis_f.strip(),'repair_action':repair_f.strip(),
+                'diagnosis':'\n'.join(f'{n}. {v.strip()}' for n,v in enumerate((x for x in diagnosis_entries if x.strip()),1)),
+                'repair_action':'\n'.join(f'{n}. {v.strip()}' for n,v in enumerate((x for x in repair_entries if x.strip()),1)),
                 'arrival_time':arrival_f.strip(),'departure_time':departure_f.strip(),
                 'is_completed':completed_f,'next_service_date':next_date_f.strip(),
                 'next_service_hours':next_hours_f.strip(),'service_fee':service_fee_f,
