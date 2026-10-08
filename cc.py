@@ -112,7 +112,7 @@ def signature_to_base64(canvas_data):
     return encoded
 
 
-def signature_from_drawing(drawing, width=550, height=190):
+def signature_from_drawing(drawing, width=340, height=170):
     """Render Fabric.js strokes with path offsets and transforms, including mobile output."""
     import json
     if isinstance(drawing, str):
@@ -588,7 +588,7 @@ with form_tab:
         if signed:
             st.success(f'已簽收：{safe_str(ticket.get("signed_by", ""))}　{safe_str(ticket.get("signed_at", ""))}')
             try:
-                st.image(base64.b64decode(safe_str(ticket['customer_signature'])), width=440)
+                st.image(base64.b64decode(safe_str(ticket['customer_signature'])), use_container_width=True)
             except Exception:
                 st.warning('已存簽名資料，但無法顯示預覽。')
         else:
@@ -598,16 +598,19 @@ with form_tab:
             st.error('尚未安裝手機簽名元件。請在 requirements.txt 加入 streamlit-drawable-canvas。')
         else:
             st.caption('請在下方白色區域簽名。即使元件沒有回傳圖片，也會由手寫筆跡產生簽名 PNG。')
+            # Fixed canvas pixels: keep within a typical mobile viewport.
+            SIGN_PAD_WIDTH, SIGN_PAD_HEIGHT = 340, 170
+            st.caption('簽名區：340 × 170 px（手機友善尺寸）')
             canvas = st_canvas(
                 fill_color='rgba(255,255,255,0)',
                 stroke_width=3,
                 stroke_color='#17263C',
                 background_color='#FFFFFF',
                 update_streamlit=True,
-                height=190,
-                width=550,
+                height=SIGN_PAD_HEIGHT,
+                width=SIGN_PAD_WIDTH,
                 drawing_mode='freedraw',
-                key=f'canvas_{selected_id}',
+                key=f'canvas_mobile_v2_{selected_id}',
             )
             st.caption('如畫布簽名無法儲存，可在手機記事本／繪圖 App 簽名後，截圖並上傳。')
             uploaded_signature = st.file_uploader(
@@ -630,7 +633,7 @@ with form_tab:
                             if signature_image is not None:
                                 encoded = signature_to_base64(signature_image)
                             else:
-                                encoded = signature_from_drawing(drawing)
+                                encoded = signature_from_drawing(drawing, width=SIGN_PAD_WIDTH, height=SIGN_PAD_HEIGHT)
                         df.at[selected_idx, 'customer_signature'] = encoded
                         df.at[selected_idx, 'signed_by'] = signer.strip()
                         df.at[selected_idx, 'signed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
