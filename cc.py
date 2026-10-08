@@ -112,63 +112,100 @@ def signature_to_base64(canvas_data):
 
 
 def signature_from_drawing(drawing, width=550, height=190):
-    """從 Fabric.js 路徑資料重建簽名，無需依賴 canvas.image_data。"""
-    canvas = Image.new('RGB', (width, height), 'white')
-    pen = ImageDraw.Draw(canvas)
-    rendered = False
+    """Render Fabric.js strokes with path offsets and transforms, including mobile output."""
+    import json
+    if isinstance(drawing, str):
+        drawing = json.loads(drawing)
+    if not isinstance(drawing, dict):
+        raise ValueError('簽名資料格式異常，請重新整理後再簽名。')
+    image = Image.new('RGB', (width, height), 'white')
+    pen = ImageDraw.Draw(image)
+    count = 0
     for obj in drawing.get('objects', []):
-        if obj.get('type') != 'path':
+        if not isinstance(obj, dict):
             continue
         commands = obj.get('path', [])
+        if isinstance(commands, str):
+            try:
+                commands = json.loads(commands)
+            except ValueError:
+                continue
         if not commands:
             continue
         offset = obj.get('pathOffset') or {}
-        ox, oy = float(offset.get('x', 0)), float(offset.get('y', 0))
-        left, top = float(obj.get('left', 0)), float(obj.get('top', 0))
-        sx, sy = float(obj.get('scaleX', 1)), float(obj.get('scaleY', 1))
-        stroke_width = max(2, round(float(obj.get('strokeWidth', 3)) * max(sx, sy)))
+        ox = float(offset.get('x', 0)) if isinstance(offset, dict) else 0
+        oy = float(offset.get('y', 0)) if isinstance(offset, dict) else 0
+        left = float(obj.get('left') or 0)
+        top = float(obj.get('top') or 0)
+        sx = float(obj.get('scaleX') or 1)
+        sy = float(obj.get('scaleY') or 1)
+        width_obj = float(obj.get('width') or 0)
+        height_obj = float(obj.get('height') or 0)
+        # Fabric's left/top are object bounds; pathOffset is in path coordinates.
+        if not offset:
+            ox, oy = width_obj / 2, height_obj / 2
+        stroke_width = max(2, round(float(obj.get('strokeWidth') or 3)))
         def pos(x, y):
-            return (left + (float(x) - ox) * sx, top + (float(y) - oy) * sy)
+            return (left + (float(x) - ox + width_obj / 2) * sx,
+                    top + (float(y) - oy + height_obj / 2) * sy)
         previous = None
         for command in commands:
+            if not isinstance(command, (list, tuple)) or not command:
+                continue
             kind = str(command[0]).upper()
             args = command[1:]
             if kind == 'M' and len(args) >= 2:
                 previous = pos(args[0], args[1])
-                pen.ellipse((previous[0]-1, previous[1]-1, previous[0]+1, previous[1]+1), fill='black')
-                rendered = True
+                pen.ellipse((previous[0]-2,previous[1]-2,previous[0]+2,previous[1]+2),fill='black')
+                count += 1
             elif kind == 'L' and len(args) >= 2 and previous is not None:
-                point = pos(args[0], args[1])
-                pen.line([previous, point], fill='black', width=stroke_width, joint='curve')
-                previous = point
-                rendered = True
-            elif kind == 'Q' and len(args) >= 4 and previous is not None:
-                control = pos(args[0], args[1]); end = pos(args[2], args[3])
-                points = []
-                for i in range(21):
-                    t = i / 20
-                    points.append(((1-t)**2*previous[0]+2*(1-t)*t*control[0]+t*t*end[0],
-                                   (1-t)**2*previous[1]+2*(1-t)*t*control[1]+t*t*end[1]))
-                pen.line(points, fill='black', width=stroke_width, joint='curve')
-                previous = end
-                rendered = True
-            elif kind == 'C' and len(args) >= 6 and previous is not None:
-                c1 = pos(args[0], args[1]); c2 = pos(args[2], args[3]); end = pos(args[4], args[5])
-                points = []
-                for i in range(21):
-                    t = i / 20
-                    points.append(((1-t)**3*previous[0]+3*(1-t)**2*t*c1[0]+3*(1-t)*t*t*c2[0]+t**3*end[0],
-                                   (1-t)**3*previous[1]+3*(1-t)**2*t*c1[1]+3*(1-t)*t*t*c2[1]+t**3*end[1]))
-                pen.line(points, fill='black', width=stroke_width, joint='curve')
-                previous = end
-                rendered = True
-    if not rendered:
-        raise ValueError('沒有可辨識的手寫筆跡，請清除後重新簽名。')
-    output = io.BytesIO()
-    canvas.save(output, format='PNG', optimize=True)
-    encoded = base64.b64encode(output.getvalue()).decode('ascii')
-    if len(encoded) > 48000:
-        raise ValueError('簽名資料過大，請清除後重新簽名。')
+                point = pos(args[0], args[1]); pen.line([previous,point],fill='black',width=stroke_width)
+                previous=point; count += 1
+            elif kind in ('Q','C') and previous is not None:
+                required = 4 if kind=='Q' else 6
+                if len(args) < required: continue
+                pts = [pos(args[i], args[i+1]) for i in range(0, required, 2)]
+                segment = []
+                for i in range(31):
+                    t=i/30; u=1-t
+                    if kind=='Q':
+                        x=u*u*previous[0]+2*u*t*pts[0][0]+t*t*pts[1][0]
+                        y=u*u*previous[1]+2*u*t*pts[0][1]+t*t*pts[1][1]
+                    else:
+                        x=u**3*previous[0]+3*u*u*t*pts[0][0]+3*u*t*t*pts[1][0]+t**3*pts[2][0]
+                        y=u**3*previous[1]+3*u*u*t*pts[0][1]+3*u*t*t*pts[1][1]+t**3*pts[2][1]
+                    segment.append((x,y))
+                pen.line(segment,fill='black',width=stroke_width)
+                previous=pts[-1]; count += 1
+        # support simple line objects
+        if obj.get('type')=='line':
+            pen.line([(float(obj.get('x1',0)),float(obj.get('y1',0))),
+                      (float(obj.get('x2',0)),float(obj.get('y2',0)))],fill='black',width=stroke_width)
+            count += 1
+    if count == 0:
+        raise ValueError('簽名元件未提供可用筆跡。可改用下方上傳簽名照片功能。')
+    output=io.BytesIO(); image.save(output,format='PNG',optimize=True)
+    encoded=base64.b64encode(output.getvalue()).decode('ascii')
+    if len(encoded)>48000:
+        raise ValueError('簽名資料超過 Google Sheets 限制。')
+    return encoded
+
+
+def signature_from_upload(uploaded):
+    """Reliable fallback for phones: image upload or camera snapshot."""
+    image = Image.open(uploaded).convert('RGB')
+    image.thumbnail((550,190))
+    white=Image.new('RGB',(550,190),'white')
+    white.paste(image,((550-image.width)//2,(190-image.height)//2))
+    output=io.BytesIO(); white.save(output,format='PNG',optimize=True)
+    encoded=base64.b64encode(output.getvalue()).decode('ascii')
+    if len(encoded)>48000:
+        # threshold and reduce palette for ink signatures
+        mono=white.convert('L').point(lambda x: 255 if x>190 else 0,'1')
+        output=io.BytesIO(); mono.save(output,format='PNG',optimize=True)
+        encoded=base64.b64encode(output.getvalue()).decode('ascii')
+    if len(encoded)>48000:
+        raise ValueError('簽名圖片過大，請使用簡單白底黑字的簽名圖片。')
     return encoded
 
 
@@ -377,32 +414,33 @@ with signature_tab:
                 drawing_mode='freedraw',
                 key=f'canvas_{selected_id}',
             )
+            st.caption('如畫布簽名無法儲存，可在手機記事本／繪圖 App 簽名後，截圖並上傳。')
+            uploaded_signature = st.file_uploader(
+                '備用：上傳簽名圖片（PNG／JPG）', type=['png','jpg','jpeg'],
+                key=f'upload_signature_{selected_id}'
+            )
             if st.button('💾 儲存客戶簽名', type='primary', key=f'save_signature_{selected_id}'):
                 if not signer.strip():
                     st.error('請先輸入簽收人姓名。')
                 else:
-                    # Some streamlit-drawable-canvas versions return no image_data_url.
-                    # Accessing canvas.image_data in that case raises RuntimeError.
-                    # Read the drawing metadata first and handle missing image safely.
                     try:
-                        drawing = canvas.json_data or {}
-                        if not drawing.get('objects'):
-                            st.error('請先在簽名區書寫，再按儲存。')
+                        if uploaded_signature is not None:
+                            encoded = signature_from_upload(uploaded_signature)
                         else:
+                            drawing = canvas.json_data or {}
                             try:
                                 signature_image = canvas.image_data
                             except (RuntimeError, ValueError, AttributeError):
                                 signature_image = None
-                            # 新版 Streamlit 可能不回傳 image_data；改從筆跡路徑重建 PNG。
-                            if signature_image is None:
-                                encoded = signature_from_drawing(drawing)
-                            else:
+                            if signature_image is not None:
                                 encoded = signature_to_base64(signature_image)
-                                df.at[selected_idx, 'customer_signature'] = encoded
-                                df.at[selected_idx, 'signed_by'] = signer.strip()
-                                df.at[selected_idx, 'signed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                df.at[selected_idx, 'updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                save_tickets(df)
+                            else:
+                                encoded = signature_from_drawing(drawing)
+                        df.at[selected_idx, 'customer_signature'] = encoded
+                        df.at[selected_idx, 'signed_by'] = signer.strip()
+                        df.at[selected_idx, 'signed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        df.at[selected_idx, 'updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        save_tickets(df)
                     except Exception as exc:
                         st.error(f'簽名儲存失敗：{exc}')
         st.divider()
