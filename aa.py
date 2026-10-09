@@ -8,6 +8,7 @@ import io
 import os
 import plotly.express as px
 import plotly.graph_objects as go
+from shared_employees import employee_names, employee_selector
 
 # Excel 匯出為選用功能；即使環境尚未安裝 openpyxl，主系統仍可正常執行
 try:
@@ -884,10 +885,7 @@ with tab_rfq:
 
         with c5:
 
-            new_owner = st.text_input(
-                "👤 負責人",
-                value="業務承辦"
-            )
+            new_owner = employee_selector("👤 負責人（共用員工主檔）", "rfq_new_owner", "業務承辦", employee_names())
 
 
         new_evidence = st.text_area(
