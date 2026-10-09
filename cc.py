@@ -5,6 +5,7 @@ from datetime import datetime, date
 import uuid
 import io
 import base64
+import time
 from PIL import Image, ImageDraw
 from shared_employees import employee_names, employee_selector
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as PDFImage, KeepTogether, Flowable
@@ -62,27 +63,45 @@ if not SPREADSHEET_URL:
 
 conn = st.connection('gsheets', type=GSheetsConnection)
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_ticket_read(spreadsheet_url, _connection):
+    """共用快取，避免每次 Streamlit rerun 都向 Sheets 發出新讀取。"""
+    for attempt in range(3):
+        try:
+            return _connection.read(spreadsheet=spreadsheet_url, worksheet=SHEET, ttl=600)
+        except Exception as exc:
+            message = str(exc).lower()
+            quota_error = ('429' in message or 'resource_exhausted' in message
+                           or 'quota exceeded' in message or 'rate_limit_exceeded' in message)
+            if not quota_error or attempt == 2:
+                raise
+            time.sleep(5 * (2 ** attempt))
+
+
 def read_tickets():
     try:
-        data = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=SHEET, ttl=300)
+        data = _cached_ticket_read(SPREADSHEET_URL, conn)
         if data is None:
             data = pd.DataFrame()
         for c in COLUMNS:
             if c not in data.columns:
                 data[c] = ''
-        # Google Sheets 讀取時 pandas 可能把空白欄推斷成 float64。
-        # 後續需要同欄存文字/日期/數字，先轉為 object 避免 LossySetitemError。
         return data[COLUMNS].copy().astype(object)
     except Exception as exc:
-        st.error(f'無法讀取 {SHEET} 工作表。請檢查試算表網址、ServiceTickets 分頁及服務帳號的共用權限。')
+        message = str(exc).lower()
+        if any(k in message for k in ('429', 'resource_exhausted', 'quota exceeded', 'rate_limit_exceeded')):
+            st.error('Google Sheets API 讀取配額已達上限（429）。請稍候約 1～2 分鐘再重新整理；避免同時反覆刷新三套系統。')
+        else:
+            st.error(f'無法讀取 {SHEET} 工作表。請檢查試算表網址、工作表及服務帳號權限。')
         st.exception(exc)
         st.stop()
+
 
 def save_tickets(data):
     try:
         data = data[COLUMNS].copy().astype(object)
         conn.update(spreadsheet=SPREADSHEET_URL, worksheet=SHEET, data=data.fillna(''))
-        st.cache_data.clear()
+        _cached_ticket_read.clear()
         st.success('資料已儲存')
         st.rerun()
     except Exception as exc:
