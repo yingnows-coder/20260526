@@ -430,12 +430,16 @@ df = read_tickets()
 new_tab, manage_tab, form_tab, dashboard_tab, history_tab = st.tabs(['📝 建立報修單','🔧 維修工單管理','📄 售後服務單填寫','📊 售服 KPI','📚 維修紀錄'])
 with new_tab:
     st.subheader('建立客戶報修工單')
+    from shared_contacts import customer_options
+    _customer_labels, _customer_records = customer_options()
+    _selected_customer = st.selectbox('從共用主檔選擇客戶', ['手動輸入'] + _customer_labels, key='service_customer_choice')
+    _customer_record = _customer_records.get(_selected_customer, {})
     with st.form('new_service_ticket', clear_on_submit=True):
         a,b,c = st.columns(3)
         with a:
-            customer = st.text_input('客戶名稱 *')
-            contact = st.text_input('聯絡人')
-            phone = st.text_input('電話 / 聯絡方式')
+            customer = st.text_input('客戶名稱 *', value=str(_customer_record.get('company_name','')))
+            contact = st.text_input('聯絡人', value=str(_customer_record.get('contact','')))
+            phone = st.text_input('電話 / 聯絡方式', value=str(_customer_record.get('phone','')))
         with b:
             model = st.text_input('機台型號 *')
             serial = st.text_input('機台序號')
@@ -445,7 +449,7 @@ with new_tab:
             engineer = st.text_input('預定負責工程師')
             schedule = st.date_input('預計處理日期', value=date.today())
         st.markdown('#### 售後服務單基本資料')
-        address = st.text_input('客戶住址')
+        address = st.text_input('客戶住址', value=str(_customer_record.get('address','')))
         manufacture_date = st.text_input('機台出廠日（YYYY-MM-DD，可留空）')
         issue = st.text_area('故障現象 / 客戶反映 *')
         submitted = st.form_submit_button('➕ 建立維修工單', type='primary')
@@ -756,3 +760,4 @@ with st.expander('⚙️ Google Sheets 工作表設定'):
     st.code(','.join(COLUMNS))
     st.info('新增的 3 欄為 customer_signature、signed_by、signed_at，請加在 ServiceTickets 工作表第一列原有欄位後方。')
     st.caption('讀取快取 TTL 為 300 秒；寫入後清除 Streamlit 資料快取。')
+# 共用客戶／廠商主檔
