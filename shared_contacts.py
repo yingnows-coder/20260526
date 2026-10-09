@@ -128,4 +128,3 @@ def customer_options():
     labels = [f"{row['company_name']}｜{row['customer_id']}" for _,row in active.iterrows() if str(row['company_name']).strip()]
     mapping = {f"{row['company_name']}｜{row['customer_id']}":row.to_dict() for _,row in active.iterrows() if str(row['company_name']).strip()}
     return labels, mapping
-
