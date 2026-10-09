@@ -6,6 +6,7 @@ import uuid
 import io
 import base64
 from PIL import Image, ImageDraw
+from shared_employees import employee_names, employee_selector
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image as PDFImage, KeepTogether, Flowable
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -426,6 +427,7 @@ def make_ticket_pdf(ticket):
 
 
 df = read_tickets()
+EMPLOYEE_NAMES = employee_names()
 
 new_tab, manage_tab, form_tab, dashboard_tab, history_tab = st.tabs(['📝 建立報修單','🔧 維修工單管理','📄 售後服務單填寫','📊 售服 KPI','📚 維修紀錄'])
 with new_tab:
@@ -446,7 +448,7 @@ with new_tab:
             warranty = st.selectbox('保固狀態', ['待確認','保固內','保固外'])
         with c:
             priority = st.selectbox('緊急程度', PRIORITIES)
-            engineer = st.text_input('預定負責工程師')
+            engineer = employee_selector('預定負責工程師', 'new_service_engineer', names=EMPLOYEE_NAMES)
             schedule = st.date_input('預計處理日期', value=date.today())
         st.markdown('#### 售後服務單基本資料')
         address = st.text_input('客戶住址', value=str(_customer_record.get('address','')))
@@ -488,7 +490,7 @@ with manage_tab:
                     current=safe_str(item['status']); status=st.selectbox('維修狀態',STATUSES,index=STATUSES.index(current) if current in STATUSES else 0)
                     priority=safe_str(item['priority']); priority_new=st.selectbox('優先程度',PRIORITIES,index=PRIORITIES.index(priority) if priority in PRIORITIES else 0)
                 with c2:
-                    engineer_new=st.text_input('負責工程師',value=safe_str(item['engineer']))
+                    engineer_new=employee_selector('負責工程師','edit_service_engineer',safe_str(item['engineer']),EMPLOYEE_NAMES)
                     warranty=safe_str(item['warranty']); warranty_new=st.selectbox('保固', ['待確認','保固內','保固外'],index=['待確認','保固內','保固外'].index(warranty) if warranty in ['待確認','保固內','保固外'] else 0)
                 with c3:
                     parts_cost=st.number_input('零件費用',min_value=0.0,value=number(item['parts_cost']))
@@ -540,7 +542,7 @@ with form_tab:
             manufactured_f=st.text_input('出廠日',value=old('manufacture_date'),placeholder='YYYY-MM-DD')
         with c:
             created_f=st.text_input('服務單日期',value=old('created_at')[:10],placeholder='YYYY-MM-DD')
-            engineer_f=st.text_input('服務人員',value=old('engineer'))
+            engineer_f=employee_selector('服務人員','service_form_engineer',old('engineer'),EMPLOYEE_NAMES)
         st.markdown('#### 2. 故障原因與處理方式（按需追加）')
         def split_entries(raw):
             import re
@@ -621,9 +623,9 @@ with form_tab:
             st.metric('費用總計（零件＋服務費＋稅金）',f'{subtotal_f+service_fee_f+tax_f:,.2f}')
         a,b=st.columns(2)
         with a:
-            supervisor_f=st.text_input('售服主管',value=old('service_supervisor'))
+            supervisor_f=employee_selector('售服主管','service_form_supervisor',old('service_supervisor'),EMPLOYEE_NAMES)
         with b:
-            sales_f=st.text_input('業務主管',value=old('sales_supervisor'))
+            sales_f=employee_selector('業務主管','service_form_sales',old('sales_supervisor'),EMPLOYEE_NAMES)
         saved_form=st.button('💾 儲存售後服務單資料',type='primary',use_container_width=True, key=f'save_paper_{form_ticket_id}')
         if saved_form:
             updates={
