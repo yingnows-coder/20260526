@@ -852,9 +852,10 @@ with tab_rfq:
 
         with c2:
 
-            new_customer = st.text_input(
-                "🏭 客戶資訊"
-            )
+            from shared_contacts import customer_options
+            _labels, _mapping = customer_options()
+            _customer_choice = st.selectbox("🏭 選擇共用客戶", ["手動輸入"] + _labels, key="rfq_master_customer")
+            new_customer = (st.text_input("🏭 客戶資訊") if _customer_choice == "手動輸入" else str(_mapping[_customer_choice].get("company_name", "")))
 
 
         with c3:
@@ -5732,11 +5733,3 @@ with tab_log:
 
         )
 
-# 共用客戶／廠商主檔（與 bb.py、cc.py 共用）
-from shared_contacts import render_master
-with st.expander('👥 客戶／🏭 廠商共用主檔管理', expanded=False):
-    master_customer_tab, master_supplier_tab = st.tabs(['👥 客戶管理','🏭 廠商管理'])
-    with master_customer_tab:
-        render_master('customer', 'aa')
-    with master_supplier_tab:
-        render_master('supplier', 'aa')
