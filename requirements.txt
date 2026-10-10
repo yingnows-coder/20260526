@@ -6,4 +6,4 @@ openpyxl
 Pillow
 reportlab
 streamlit-drawable-canvas
-gspread>=6,<7
+gspread>=5.8.0,<6
