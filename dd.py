@@ -1,7 +1,7 @@
 """JENN-WEI 出貨管理：與 AA／BB／CC 共用 Google Sheets。
-部署：保留現有 requirements.txt，加入 gspread>=6,<7。
+部署：保留現有 requirements.txt，加入 gspread>=5.8.0,<6。
 複製 BB 的 [connections.gsheets] service_account Secrets 及 SERVICE_SPREADSHEET_URL（若有）。
-自動建立 Shipments、ShipmentChecks、ShipmentAudit；既有 PostgreSQL 資料不會自動遷移。
+自動建立 Shipments、ShipmentChecks、ShipmentAudit、WarrantyRecords；既有 PostgreSQL 資料不會自動遷移。
 客戶優先沿用 shared_contacts.load_master；沒有該模組則讀 Customers.company_name。
 Sheets 版本檢查不具跨部署原子鎖，請避免同時修改同一單據或手動排序資料分頁。
 """
@@ -33,7 +33,8 @@ CHECKS = [
 SHIP_COLS = ["id", "shipment_no", "customer_name", "machine_type", "machine_model", "serial_number", "quantity", "sales_order_no", "owner", "planned_ship_date", "destination", "incoterms", "carrier", "notes", "status", "tracking_no", "actual_ship_date", "received_by", "received_date", "version", "created_at", "updated_at"]
 CHECK_COLS = ["shipment_id", "item_key", "checked", "checked_by", "checked_at"]
 AUDIT_COLS = ["id", "shipment_id", "event", "detail", "actor", "created_at"]
-SCHEMAS = {"Shipments": SHIP_COLS, "ShipmentChecks": CHECK_COLS, "ShipmentAudit": AUDIT_COLS}
+WARRANTY_COLS = ["id", "shipment_id", "shipment_no", "customer_name", "machine_type", "machine_model", "serial_number", "sales_order_no", "owner", "actual_ship_date", "received_date", "start_basis", "start_date", "end_date", "terms", "notes", "version", "created_at", "updated_at"]
+SCHEMAS = {"WarrantyRecords": WARRANTY_COLS, "Shipments": SHIP_COLS, "ShipmentChecks": CHECK_COLS, "ShipmentAudit": AUDIT_COLS}
 
 
 def now():
@@ -83,7 +84,7 @@ def worksheet(name):
         if not header:
             sheet.append_row(SCHEMAS[name], value_input_option="RAW")
         elif header != SCHEMAS[name]:
-            raise ValueError(f"{name} 欄位不符，請核對部署包中的分頁欄位 CSV；程式不會覆蓋既有欄位。")
+            raise ValueError(f"{name} 欄位不符，請核對 dd.py 的 SCHEMAS 欄位定義；程式不會覆蓋既有欄位。")
     return sheet
 
 
@@ -161,6 +162,57 @@ def update_shipment(sid, version, changes):
         return True
 
 
+SHIPPED_STAGES = ("運送中", "客戶簽收", "完成結案")
+
+
+def ensure_warranties(shipments):
+    """Append missing records; never replace confirmed warranty terms on retries."""
+    _, lock = connect_sheet()
+    with lock:
+        existing = {r["shipment_id"] for r in records("WarrantyRecords")}
+        additions = []
+        for shipment in shipments:
+            if shipment["status"] not in SHIPPED_STAGES or not shipment.get("actual_ship_date") or shipment["id"] in existing:
+                continue
+            row = {k: shipment.get(k, "") for k in ("shipment_no", "customer_name", "machine_type", "machine_model", "serial_number", "sales_order_no", "owner", "actual_ship_date", "received_date")}
+            row.update(id="WAR-" + shipment["id"], shipment_id=shipment["id"], start_basis="待確認", version=1, created_at=now(), updated_at=now())
+            additions.append(encode(row, WARRANTY_COLS))
+            existing.add(shipment["id"])
+        if additions:
+            worksheet("WarrantyRecords").append_rows(additions, value_input_option="RAW")
+        return len(additions)
+
+
+def update_warranty(wid, version, changes):
+    _, lock = connect_sheet()
+    with lock:
+        current = next((r for r in records("WarrantyRecords") if r["id"] == wid), None)
+        if current is None or int(current.get("version") or 1) != version:
+            return False
+        current.update(changes, version=version + 1, updated_at=now())
+        n = current["_row"]
+        worksheet("WarrantyRecords").update(range_name=f"A{n}:S{n}", values=[encode(current, WARRANTY_COLS)], value_input_option="RAW")
+        return True
+
+
+def warranty_state(row, shipment_status):
+    if shipment_status == "取消":
+        return "出貨已取消／待人工確認"
+    if shipment_status not in SHIPPED_STAGES:
+        return "出貨狀態異動／待人工確認"
+    if row.get("start_basis") == "待確認" or not row.get("start_date") or not row.get("end_date"):
+        return "待確認保固條件"
+    try:
+        start, end = date.fromisoformat(row["start_date"]), date.fromisoformat(row["end_date"])
+    except ValueError:
+        return "日期格式錯誤"
+    if end < start:
+        return "日期範圍錯誤"
+    if today() < start:
+        return "尚未起算"
+    return "保固中" if today() <= end else "已到期"
+
+
 @st.cache_data(ttl=60)
 def read_master(sheet):
     try:
@@ -229,7 +281,7 @@ c2.metric("進行中", open_count)
 c3.metric("待出貨", sum(s["status"] == "待出貨" for s in shipments))
 c4.metric("已完成", sum(s["status"] == "完成結案" for s in shipments))
 
-tab1, tab2, tab3, tab4 = st.tabs(["📋 出貨總覽", "➕ 新增出貨單", "🛠️ 出貨作業", "📈 紀錄與匯出"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 出貨總覽", "➕ 新增出貨單", "🛠️ 出貨作業", "📈 紀錄與匯出", "🛡️ 保固紀錄"])
 
 with tab1:
     q = st.text_input("搜尋：出貨單號／客戶／機型／機台序號／訂單號")
@@ -340,7 +392,13 @@ with tab3:
                     st.error("資料已被其他使用者修改，請重新整理後再操作。")
                 else:
                     audit(sid,"更新出貨進度",f"{current['status']} → {status}")
-                    st.success("已儲存")
+                    try:
+                        latest_shipments = records("Shipments")
+                        ensure_warranties(latest_shipments)
+                    except Exception:
+                        st.warning("出貨進度已儲存，但保固紀錄建立失敗。請到保固紀錄頁重新整理補建。")
+                        st.stop()
+                    st.success("已儲存；已出貨單據已建立保固紀錄。")
                     st.rerun()
 
 with tab4:
@@ -358,3 +416,66 @@ with tab4:
     else:
         st.info("尚無出貨資料。")
 
+
+with tab5:
+    st.subheader("🛡️ 出貨後保固紀錄")
+    st.caption("已出貨單據自動建檔；保固起算依據及起訖日期須依合約確認。到期日包含當日。每張出貨單以其機台序號建一筆紀錄，多台不同序號請分單建立。")
+    if st.button("重新整理／補建已出貨保固紀錄", key="warranty_refresh"):
+        st.rerun()
+    try:
+        ensure_warranties(shipments)
+        warranties = records("WarrantyRecords")
+    except Exception:
+        warranties = None
+        st.error("保固紀錄讀寫失敗；出貨資料不受影響。請核對 WarrantyRecords 分頁、標題及編輯權限後重試。")
+    if warranties is not None:
+        shipment_statuses = {r["id"]: r["status"] for r in shipments}
+        for w in warranties:
+            w["warranty_status"] = warranty_state(w, shipment_statuses.get(w["shipment_id"], ""))
+        keyword = st.text_input("搜尋保固：客戶／機型／序號／出貨單號", key="warranty_search").strip().lower()
+        filtered_w = [w for w in warranties if not keyword or any(keyword in str(w.get(k, "")).lower() for k in ("customer_name", "machine_model", "serial_number", "shipment_no"))]
+        labels = {"shipment_no":"出貨單號", "customer_name":"客戶", "machine_model":"機型", "serial_number":"機台序號", "actual_ship_date":"出貨日期", "start_basis":"起算依據", "start_date":"保固起日", "end_date":"保固迄日", "warranty_status":"保固狀態", "owner":"負責人"}
+        if filtered_w:
+            st.dataframe(pd.DataFrame(filtered_w)[list(labels)].rename(columns=labels), use_container_width=True, hide_index=True)
+        if warranties:
+            st.download_button("下載保固紀錄 CSV", pd.DataFrame(warranties).drop(columns=["_row"]).to_csv(index=False).encode("utf-8-sig"), "JENNWEI_warranties.csv", "text/csv")
+            options = {w["id"]: w for w in warranties}
+            wid = st.selectbox("選擇保固紀錄", list(options), format_func=lambda x: f"{options[x]['shipment_no']}｜{options[x]['serial_number']}｜{options[x]['customer_name']}")
+            w = options[wid]
+            with st.form("warranty_" + wid):
+                bases = ["待確認", "出貨日", "簽收日", "驗收日", "合約指定日"]
+                basis = st.selectbox("保固起算依據", bases, index=bases.index(w["start_basis"]) if w["start_basis"] in bases else 0)
+                start_text = st.text_input("保固起日（YYYY-MM-DD；待確認可留空）", value=w["start_date"])
+                end_text = st.text_input("保固迄日（YYYY-MM-DD；待確認可留空）", value=w["end_date"])
+                terms = st.text_area("保固範圍／合約條件", value=w["terms"])
+                warranty_notes = st.text_area("保固備註", value=w["notes"])
+                submitted_w = st.form_submit_button("儲存保固條件", type="primary")
+            if submitted_w:
+                try:
+                    start_date = date.fromisoformat(start_text.strip()) if start_text.strip() else None
+                    end_date = date.fromisoformat(end_text.strip()) if end_text.strip() else None
+                    if bool(start_date) != bool(end_date):
+                        raise ValueError("保固起日與迄日需一起填寫，或一起留空。")
+                    if start_date and end_date < start_date:
+                        raise ValueError("保固迄日不可早於起日。")
+                    if start_date and basis == "待確認":
+                        raise ValueError("填寫日期時，請確認保固起算依據。")
+                    source = next((r for r in shipments if r["id"] == w["shipment_id"]), {})
+                    expected_start = source.get("actual_ship_date") if basis == "出貨日" else source.get("received_date") if basis == "簽收日" else None
+                    if start_date and basis in ("出貨日", "簽收日") and start_date != expected_start:
+                        raise ValueError("起日需與出貨單上的對應日期一致；若尚無日期，請先補齊出貨單。")
+                except ValueError as exc:
+                    st.error(f"日期或條件有誤：{exc}")
+                else:
+                    try:
+                        saved_w = update_warranty(wid, int(w.get("version") or 1), {"start_basis":basis, "start_date":start_text.strip(), "end_date":end_text.strip(), "terms":terms, "notes":warranty_notes})
+                    except Exception:
+                        st.error("保固儲存失敗，請重新整理並確認資料後重試。")
+                    else:
+                        if saved_w:
+                            audit(w["shipment_id"], "更新保固條件", f"{basis}：{start_text.strip()} ～ {end_text.strip()}")
+                            st.rerun()
+                        else:
+                            st.error("保固資料已異動，請重新整理後再修改。")
+        else:
+            st.info("尚無已出貨單據；實際出貨日期及出貨狀態儲存後，會自動建立保固紀錄。")
