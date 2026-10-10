@@ -6,3 +6,4 @@ openpyxl
 Pillow
 reportlab
 streamlit-drawable-canvas
+SQLAlchemy>=2.0,<3.0
