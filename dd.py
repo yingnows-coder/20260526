@@ -1,15 +1,19 @@
-"""JENN-WEI CNC / special-purpose machine shipping management (LAN pilot)."""
-import os
-import io
-import csv
+"""JENN-WEI 出貨管理：與 AA／BB／CC 共用 Google Sheets。
+部署：保留現有 requirements.txt，加入 gspread>=6,<7。
+複製 BB 的 [connections.gsheets] service_account Secrets 及 SERVICE_SPREADSHEET_URL（若有）。
+自動建立 Shipments、ShipmentChecks、ShipmentAudit；既有 PostgreSQL 資料不會自動遷移。
+客戶優先沿用 shared_contacts.load_master；沒有該模組則讀 Customers.company_name。
+Sheets 版本檢查不具跨部署原子鎖，請避免同時修改同一單據或手動排序資料分頁。
+"""
+import threading
+from zoneinfo import ZoneInfo
 import uuid
 from datetime import date, datetime, timezone
-from decimal import Decimal
 
 import pandas as pd
 import streamlit as st
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import IntegrityError
+import gspread
+from gspread.exceptions import WorksheetNotFound
 
 st.set_page_config(page_title="JENN-WEI 出貨管理", page_icon="🚚", layout="wide")
 
@@ -26,53 +30,164 @@ CHECKS = [
     ("payment", "出貨付款條件確認"),
 ]
 
+SHIP_COLS = ["id", "shipment_no", "customer_name", "machine_type", "machine_model", "serial_number", "quantity", "sales_order_no", "owner", "planned_ship_date", "destination", "incoterms", "carrier", "notes", "status", "tracking_no", "actual_ship_date", "received_by", "received_date", "version", "created_at", "updated_at"]
+CHECK_COLS = ["shipment_id", "item_key", "checked", "checked_by", "checked_at"]
+AUDIT_COLS = ["id", "shipment_id", "event", "detail", "actor", "created_at"]
+SCHEMAS = {"Shipments": SHIP_COLS, "ShipmentChecks": CHECK_COLS, "ShipmentAudit": AUDIT_COLS}
+
+
+def now():
+    return datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
+
+
+def today():
+    return datetime.now(ZoneInfo("Asia/Taipei")).date()
+
+
 @st.cache_resource
-def engine(url):
-    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=10)
-
-
-def db():
-    url = os.getenv("DATABASE_URL", "")
-    if not url:
+def connect_sheet():
+    config = dict(st.secrets["connections"]["gsheets"])
+    if config.get("type") != "service_account":
+        raise ValueError("請複製 AA／BB／CC 的 service_account Google Sheets Secrets；公開唯讀連線不能儲存。")
+    target = str(st.secrets.get("SERVICE_SPREADSHEET_URL", "") or config.get("spreadsheet", "")).strip()
+    config.pop("spreadsheet", None)
+    if not target:
+        raise ValueError("connections.gsheets.spreadsheet 尚未設定。")
+    config.pop("worksheet", None)
+    allowed = {"type", "project_id", "private_key_id", "private_key", "client_email", "client_id", "auth_uri", "token_uri", "auth_provider_x509_cert_url", "client_x509_cert_url", "universe_domain"}
+    credentials = {k: v for k, v in config.items() if k in allowed}
+    client = gspread.service_account_from_dict(credentials)
+    if target.startswith("https://"):
+        book = client.open_by_url(target)
+    elif " " not in target and len(target) >= 25:
+        # Try an ID first, then a title if the configured value is a long title.
         try:
-            url = str(st.secrets.get("DATABASE_URL", ""))
-        except Exception:
-            pass
-    if not url:
-        st.error("請先設定 DATABASE_URL（PostgreSQL 連線字串）。")
-        st.stop()
-    return engine(url)
+            book = client.open_by_key(target)
+        except gspread.exceptions.SpreadsheetNotFound:
+            book = client.open(target)
+    else:
+        book = client.open(target)
+    return book, threading.RLock()
 
 
-def rows(sql, params=None):
-    with db().connect() as c:
-        return [dict(r) for r in c.execute(text(sql), params or {}).mappings()]
+def worksheet(name):
+    book, _ = connect_sheet()
+    try:
+        sheet = book.worksheet(name)
+    except WorksheetNotFound:
+        if name not in SCHEMAS:
+            raise
+        sheet = book.add_worksheet(title=name, rows=1000, cols=len(SCHEMAS[name]))
+    if name in SCHEMAS:
+        header = sheet.row_values(1)
+        if not header:
+            sheet.append_row(SCHEMAS[name], value_input_option="RAW")
+        elif header != SCHEMAS[name]:
+            raise ValueError(f"{name} 欄位不符，請核對部署包中的分頁欄位 CSV；程式不會覆蓋既有欄位。")
+    return sheet
 
 
-def execute(sql, params=None):
-    with db().begin() as c:
-        return c.execute(text(sql), params or {})
+def records(name):
+    sheet = worksheet(name)
+    values = sheet.get_all_values()
+    if not values:
+        return []
+    header = values[0]
+    result = []
+    for rownum, cells in enumerate(values[1:], start=2):
+        if not any(cells):
+            continue
+        row = dict(zip(header, cells + [""] * max(0, len(header) - len(cells))))
+        row["_row"] = rownum
+        if name == "Shipments":
+            row["quantity"] = int(float(row.get("quantity") or 1))
+            row["version"] = int(float(row.get("version") or 1))
+            for key in ("planned_ship_date", "actual_ship_date", "received_date"):
+                row[key] = date.fromisoformat(row[key][:10]) if row.get(key) else None
+        if name == "ShipmentChecks":
+            row["checked"] = str(row.get("checked", "")).lower() in ("true", "1", "yes")
+        result.append(row)
+    return result
+
+
+def encode(row, columns):
+    return [dstr(row.get(k, "")) for k in columns]
 
 
 def audit(shipment_id, event, detail=""):
-    execute("INSERT INTO shipment_audit (shipment_id, event, detail, actor) VALUES (:id,:event,:detail,:actor)",
-            {"id": shipment_id, "event": event, "detail": detail, "actor": st.session_state.get("operator", "未指定")})
+    row = {"id": str(uuid.uuid4()), "shipment_id": shipment_id, "event": event, "detail": detail,
+           "actor": st.session_state.get("operator", "未指定"), "created_at": now()}
+    try:
+        worksheet("ShipmentAudit").append_row(encode(row, AUDIT_COLS), value_input_option="RAW")
+    except Exception:
+        st.warning("主要資料已儲存，但操作紀錄寫入失敗，請核對 ShipmentAudit 分頁與權限。")
 
 
+def add_shipment(row):
+    row.update(status="建立出貨單", version=1, created_at=now(), updated_at=now())
+    worksheet("Shipments").append_row(encode(row, SHIP_COLS), value_input_option="RAW")
+
+
+def save_checks(sid, values):
+    _, lock = connect_sheet()
+    with lock:
+        existing = {r["item_key"]: r for r in records("ShipmentChecks") if r["shipment_id"] == sid}
+        sheet = worksheet("ShipmentChecks")
+        updates, additions = [], []
+        for key, val in values.items():
+            row = {"shipment_id": sid, "item_key": key, "checked": val,
+                   "checked_by": st.session_state.operator, "checked_at": now() if val else ""}
+            cells = encode(row, CHECK_COLS)
+            if key in existing:
+                n = existing[key]["_row"]
+                updates.append({"range": f"A{n}:E{n}", "values": [cells]})
+            else:
+                additions.append(cells)
+        if updates:
+            sheet.batch_update(updates, value_input_option="RAW")
+        if additions:
+            sheet.append_rows(additions, value_input_option="RAW")
+
+
+def update_shipment(sid, version, changes):
+    _, lock = connect_sheet()
+    with lock:
+        latest = next((r for r in records("Shipments") if r["id"] == sid), None)
+        if latest is None or latest["version"] != version:
+            return False
+        latest.update(changes, version=version + 1, updated_at=now())
+        n = latest["_row"]
+        worksheet("Shipments").update(range_name=f"A{n}:V{n}", values=[encode(latest, SHIP_COLS)], value_input_option="RAW")
+        return True
+
+
+@st.cache_data(ttl=60)
 def read_master(sheet):
     try:
-        data = rows("SELECT rows FROM worksheet_store WHERE sheet_name=:sheet", {"sheet": sheet})
-        return data[0]["rows"] if data else []
+        return records(sheet)
+    except WorksheetNotFound:
+        return []
     except Exception:
+        st.warning(f"{sheet} 主檔讀取失敗，暫時可手動輸入；請檢查分頁及權限。")
         return []
 
 
 def customer_names():
-    return sorted({str(x.get("name") or x.get("customer") or "").strip() for x in read_master("Customers") if x.get("name") or x.get("customer")})
+    # Use the same shared_contacts module as BB when it is deployed alongside DD.
+    try:
+        from shared_contacts import load_master
+    except ModuleNotFoundError as exc:
+        if exc.name != "shared_contacts":
+            raise
+        data = read_master("Customers")
+    else:
+        master = load_master("customer")
+        data = [] if master is None else master.fillna("").to_dict("records")
+    return sorted({str(x.get("company_name") or x.get("name") or x.get("customer") or x.get("customer_name") or x.get("客戶名稱") or "").strip() for x in data if str(x.get("status") or "").strip() != "停用"} - {""})
 
 
 def employee_names():
-    return sorted({str(x.get("name") or "").strip() for x in read_master("Employees") if x.get("name") and str(x.get("status") or "在職").strip() not in ("離職", "留職停薪", "停用")})
+    return sorted({str(x.get("name") or x.get("owner") or x.get("姓名") or "").strip() for x in read_master("Employees") if str(x.get("status") or "在職").strip() not in ("離職", "留職停薪", "停用")} - {""})
 
 
 def pick(label, options, key, value=""):
@@ -91,14 +206,20 @@ def money(value):
     return f"{float(value or 0):,.0f}"
 
 st.title("🚚 JENN-WEI CNC 機械與專用機出貨管理")
-st.caption("內網 PostgreSQL 版本 · 出貨單、檢查表、流程管制、物流與簽收紀錄")
+st.caption("共用 Google Sheets 版本 · 出貨單、檢查表、流程管制、物流與簽收紀錄")
+st.sidebar.caption("多人操作請避免同時編輯同一張出貨單；Google Sheets 不提供資料庫交易鎖。")
 st.sidebar.text_input("操作人員（測試用）", key="operator", value="出貨承辦")
 st.sidebar.warning("此欄位不是身分驗證。正式上線須接入登入與權限系統。")
 
 try:
-    shipments = rows("SELECT * FROM shipments ORDER BY created_at DESC LIMIT 1000")
+    shipments = sorted(records("Shipments"), key=lambda x: x.get("created_at", ""), reverse=True)
+    worksheet("ShipmentChecks")
+    worksheet("ShipmentAudit")
 except Exception as exc:
-    st.error(f"無法連線出貨資料表：{exc}。請先執行 sql/02_shipments.sql")
+    st.error("無法讀取 Google Sheets。請確認 DD 的 connections.gsheets 與 AA／BB／CC 相同，且服務帳號具編輯權限。")
+    st.info("請核對 Shipments、ShipmentChecks、ShipmentAudit 欄位；完整錯誤請查看 Streamlit Cloud 日誌。")
+    import logging
+    logging.exception("DD Google Sheets initialization failed")
     st.stop()
 
 open_count = sum(s["status"] not in ("完成結案", "取消") for s in shipments)
@@ -127,7 +248,7 @@ with tab2:
         left,right = st.columns(2)
         with left:
             customer = st.selectbox("客戶主檔", ["✍️ 手動輸入"] + customer_names())
-            customer_manual = st.text_input("客戶名稱（手動輸入）") if customer == "✍️ 手動輸入" else ""
+            customer_manual = st.text_input("客戶名稱（選手動輸入時填寫）")
             machine_type = st.selectbox("機械類別", TYPES)
             model = st.text_input("機型／設備名稱 *")
             serial = st.text_input("機台序號 *")
@@ -135,8 +256,8 @@ with tab2:
             order = st.text_input("訂單／合約編號")
         with right:
             owner = st.selectbox("出貨負責人", ["✍️ 手動輸入"] + employee_names())
-            owner_manual = st.text_input("負責人（手動輸入）") if owner == "✍️ 手動輸入" else ""
-            planned = st.date_input("預計出貨日期", value=date.today())
+            owner_manual = st.text_input("負責人（選手動輸入時填寫）")
+            planned = st.date_input("預計出貨日期", value=today())
             destination = st.text_input("交貨地址／目的地")
             incoterms = st.text_input("交易條件（例如 EXW、FOB）")
             carrier = st.text_input("物流／承運商")
@@ -149,11 +270,9 @@ with tab2:
             st.error("客戶、機型、機台序號為必填。")
         else:
             new_id = str(uuid.uuid4())
-            number = "SHP-" + datetime.now().strftime("%Y%m%d") + "-" + uuid.uuid4().hex[:6].upper()
+            number = "SHP-" + datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m%d") + "-" + uuid.uuid4().hex[:6].upper()
             try:
-                execute("""INSERT INTO shipments (id,shipment_no,customer_name,machine_type,machine_model,serial_number,quantity,sales_order_no,owner,planned_ship_date,destination,incoterms,carrier,notes)
-                        VALUES (:id,:number,:customer,:type,:model,:serial,:qty,:ord,:owner,:planned,:dest,:terms,:carrier,:notes)""",
-                        {"id":new_id,"number":number,"customer":cname,"type":machine_type,"model":model.strip(),"serial":serial.strip(),"qty":int(qty),"ord":order,"owner":oname,"planned":planned,"dest":destination,"terms":incoterms,"carrier":carrier,"notes":notes})
+                add_shipment({"id":new_id,"shipment_no":number,"customer_name":cname,"machine_type":machine_type,"machine_model":model.strip(),"serial_number":serial.strip(),"quantity":int(qty),"sales_order_no":order,"owner":oname,"planned_ship_date":planned,"destination":destination,"incoterms":incoterms,"carrier":carrier,"notes":notes})
                 audit(new_id,"建立出貨單",number)
                 st.success(f"已建立 {number}")
                 st.rerun()
@@ -170,17 +289,17 @@ with tab3:
         sid = current["id"]
         st.write(f"**客戶：** {current['customer_name']}　**機型：** {current['machine_model']}　**機台序號：** {current['serial_number']}")
         st.write(f"**目前狀態：** {current['status']}　**資料版本：** {current['version']}")
-        checks = rows("SELECT item_key,checked,checked_by,checked_at FROM shipment_checks WHERE shipment_id=:id", {"id":sid})
+        checks = [r for r in records("ShipmentChecks") if r["shipment_id"] == sid]
         checked = {x["item_key"]:x for x in checks}
         with st.form(f"checks_{sid}"):
             st.markdown("#### 出貨檢查表")
             values = {key:st.checkbox(label,value=bool(checked.get(key,{}).get("checked",False)),key=f"chk_{sid}_{key}") for key,label in CHECKS}
             if st.form_submit_button("儲存檢查表"):
-                with db().begin() as conn:
-                    for key,val in values.items():
-                        conn.execute(text("""INSERT INTO shipment_checks (shipment_id,item_key,checked,checked_by,checked_at) VALUES (:id,:key,:checked,:by,CASE WHEN :checked THEN NOW() ELSE NULL END)
-                            ON CONFLICT (shipment_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,checked_by=EXCLUDED.checked_by,checked_at=EXCLUDED.checked_at"""),
-                            {"id":sid,"key":key,"checked":val,"by":st.session_state.operator})
+                try:
+                    save_checks(sid, values)
+                except Exception:
+                    st.error("檢查表儲存失敗，請重新整理並核對資料後重試。")
+                    st.stop()
                 audit(sid,"更新出貨檢查表",f"完成 {sum(values.values())}/{len(CHECKS)} 項")
                 st.success("檢查表已儲存")
                 st.rerun()
@@ -192,10 +311,10 @@ with tab3:
             with left:
                 carrier2 = st.text_input("承運商",value=current["carrier"] or "")
                 tracking = st.text_input("貨運單號",value=current["tracking_no"] or "")
-                actual = st.date_input("實際出貨日期",value=current["actual_ship_date"] or date.today())
+                actual = st.date_input("實際出貨日期",value=current["actual_ship_date"] or today())
             with right:
                 signed = st.text_input("客戶簽收人",value=current["received_by"] or "")
-                received = st.date_input("簽收日期",value=current["received_date"] or date.today())
+                received = st.date_input("簽收日期",value=current["received_date"] or today())
                 remarks = st.text_area("處理備註",value=current["notes"] or "")
             save = st.form_submit_button("儲存出貨進度",type="primary")
         if save:
@@ -208,12 +327,16 @@ with tab3:
             elif status == "完成結案" and not tracking.strip():
                 st.error("結案前請填寫貨運單號（自運案件可填寫內部運送單號）。")
             else:
-                result = execute("""UPDATE shipments SET status=:status,carrier=:carrier,tracking_no=:tracking,
-                     actual_ship_date=:actual,received_by=:signed,received_date=:received,notes=:notes,
-                     version=version+1,updated_at=NOW() WHERE id=:id AND version=:version""",
-                     {"status":status,"carrier":carrier2,"tracking":tracking,"actual":actual if status in ("運送中","客戶簽收","完成結案") else current["actual_ship_date"],
-                      "signed":signed,"received":received if status in ("客戶簽收","完成結案") else current["received_date"],"notes":remarks,"id":sid,"version":current["version"]})
-                if result.rowcount != 1:
+                try:
+                    fresh_checks = {r["item_key"] for r in records("ShipmentChecks") if r["shipment_id"] == sid and r["checked"]}
+                    if status in ("待出貨", "運送中", "客戶簽收", "完成結案") and not all(k in fresh_checks for k, _ in CHECKS):
+                        st.error("檢查表已變更，請重新確認所有檢查項目。")
+                        st.stop()
+                    result = update_shipment(sid, current["version"], {"status":status,"carrier":carrier2,"tracking_no":tracking,"actual_ship_date":actual if status in ("運送中","客戶簽收","完成結案") else current["actual_ship_date"],"received_by":signed,"received_date":received if status in ("客戶簽收","完成結案") else current["received_date"],"notes":remarks})
+                except Exception:
+                    st.error("進度儲存失敗，請重新整理並核對資料後重試。")
+                    st.stop()
+                if not result:
                     st.error("資料已被其他使用者修改，請重新整理後再操作。")
                 else:
                     audit(sid,"更新出貨進度",f"{current['status']} → {status}")
@@ -224,13 +347,13 @@ with tab4:
     if shipments:
         report = pd.DataFrame(shipments)
         st.bar_chart(report.groupby("status").size().reindex(STAGES,fill_value=0),horizontal=True)
-        export = report.drop(columns=["id"],errors="ignore").copy()
+        export = report.drop(columns=["id", "_row"],errors="ignore").copy()
         for c in export.columns:
             export[c] = export[c].map(dstr)
         st.download_button("下載出貨清單 CSV (UTF-8 BOM)", export.to_csv(index=False).encode("utf-8-sig"),"JENNWEI_shipments.csv","text/csv")
         selected_log = st.selectbox("檢視操作紀錄",[s["shipment_no"] for s in shipments],key="log_select")
         sid_log = next(s["id"] for s in shipments if s["shipment_no"] == selected_log)
-        history = rows("SELECT created_at,actor,event,detail FROM shipment_audit WHERE shipment_id=:id ORDER BY created_at DESC",{"id":sid_log})
+        history = sorted([{k:r[k] for k in ("created_at","actor","event","detail")} for r in records("ShipmentAudit") if r["shipment_id"] == sid_log], key=lambda r:r["created_at"], reverse=True)
         st.dataframe(pd.DataFrame(history),use_container_width=True,hide_index=True)
     else:
         st.info("尚無出貨資料。")
