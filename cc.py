@@ -114,13 +114,15 @@ def save_master(kind, data):
 
 def render_master(kind, prefix='shared'):
     sheet, columns = config(kind)
-    data = load_master(kind)
-    if data is None:
-        return
     id_col = columns[0]
     label = '客戶' if kind == 'customer' else '廠商'
     st.subheader(f'{label}主檔管理')
     st.caption(f'共用工作表：{sheet}｜使用編號關聯，停用資料不刪除歷史紀錄')
+    with st.spinner(f'正在讀取{label}資料…'):
+        data = load_master(kind)
+    if data is None:
+        st.info('目前無法載入資料，請依上方提示檢查設定或稍後重試。')
+        return
     search = st.text_input('搜尋公司／編號／聯絡人／電話', key=f'{prefix}_{kind}_search')
     if search:
         filtered = data[data.astype(str).apply(lambda col: col.str.contains(search, case=False, regex=False, na=False)).any(axis=1)]
@@ -180,3 +182,18 @@ def customer_options():
     labels = [f"{row['company_name']}｜{row['customer_id']}" for _,row in active.iterrows() if str(row['company_name']).strip()]
     mapping = {f"{row['company_name']}｜{row['customer_id']}":row.to_dict() for _,row in active.iterrows() if str(row['company_name']).strip()}
     return labels, mapping
+
+
+def main():
+    """Standalone page; importing this module keeps the shared API unchanged."""
+    st.set_page_config(page_title='JENN-WEI 客戶／廠商主檔', layout='wide')
+    st.title('📇 JENN-WEI 客戶／廠商主檔')
+    st.caption('管理 AA、BB、CC 共用的客戶與廠商資料')
+    section = st.radio('選擇管理項目', ['客戶主檔', '廠商主檔'],
+                       horizontal=True, key='shared_contacts_section')
+    kind = 'customer' if section == '客戶主檔' else 'supplier'
+    render_master(kind, prefix='shared_contacts')
+
+
+if __name__ == '__main__':
+    main()
